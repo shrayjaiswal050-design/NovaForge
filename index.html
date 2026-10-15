@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07131f" />
+    <meta
+      name="description"
+      content="Nova Chess — a beautiful, browser-native chess game with a tactical search engine."
+    />
+    <title>Nova Chess — Play beyond the board</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#game" aria-label="Nova Chess home">
+          <span class="brand-mark">✦</span>
+          <span>
+            <span class="brand-name">NOVA CHESS</span>
+            <span class="brand-subtitle">PLAY BEYOND THE BOARD</span>
+          </span>
+        </a>
+
+        <div class="topbar-status">
+          <span class="live-dot" aria-hidden="true"></span>
+          <span>LOCAL MATCH</span>
+          <span class="status-divider"></span>
+          <span id="match-clock">READY</span>
+        </div>
+      </header>
+
+      <main id="game" class="game-layout">
+        <section class="board-column" aria-label="Chess board and match status">
+          <div class="hero-copy">
+            <div class="eyebrow">HUMAN VS. MACHINE</div>
+            <h1>Think deeper.<br /><em>Play louder.</em></h1>
+            <p class="hero-description">
+              A live tactical duel against NovaForge, a search engine built for beautiful
+              blunders and ruthless comebacks.
+            </p>
+          </div>
+
+          <div class="match-strip">
+            <div class="player-chip player-chip-human">
+              <span class="avatar avatar-human">YOU</span>
+              <span>
+                <strong id="human-name">WHITE</strong>
+                <small id="human-state">YOUR MOVE</small>
+                <b id="human-clock" class="player-clock">5:00</b>
+              </span>
+            </div>
+            <div class="match-status">
+              <span class="turn-kicker">CURRENT TURN</span>
+              <strong id="game-status">Your move</strong>
+            </div>
+            <div class="player-chip player-chip-engine">
+              <span class="avatar avatar-engine">✦</span>
+              <span>
+                <strong id="opponent-name">NOVAFORGE</strong>
+                <small id="engine-state">READY TO HUNT</small>
+                <b id="opponent-clock" class="player-clock">5:00</b>
+              </span>
+            </div>
+          </div>
+
+          <div class="board-frame">
+            <div class="board-glow" aria-hidden="true"></div>
+            <div id="board" class="board" role="grid" aria-label="Chess board"></div>
+          </div>
+
+          <div class="board-footer">
+            <div class="board-legend">
+              <span class="legend-dot legend-dot-last"></span> LAST MOVE
+              <span class="legend-dot legend-dot-legal"></span> LEGAL MOVE
+              <span class="legend-dot legend-dot-check"></span> IN CHECK
+            </div>
+            <div class="fen-label">POSITION <span id="position-label">STARTING</span></div>
+          </div>
+        </section>
+
+        <aside class="control-column" aria-label="Game controls and engine analysis">
+          <section class="panel engine-panel">
+            <div class="panel-heading">
+              <div>
+                <div class="eyebrow">THE OPPONENT</div>
+                <h2><span id="opponent-heading-name">NovaForge</span> <span class="online-pill">ONLINE</span></h2>
+              </div>
+              <div class="engine-orb" aria-hidden="true"><span>✦</span></div>
+            </div>
+
+            <div class="engine-readout">
+              <div class="readout-row">
+                <span>ENGINE EVALUATION</span>
+                <strong id="engine-eval">+0.20</strong>
+              </div>
+              <div class="eval-track" aria-label="Engine evaluation">
+                <span id="eval-fill" class="eval-fill"></span>
+                <span class="eval-center"></span>
+              </div>
+              <div class="readout-meta">
+                <span id="engine-depth">DEPTH 0</span>
+                <span id="engine-nodes">0 NODES</span>
+                <span id="engine-time">0.0S</span>
+              </div>
+            </div>
+
+            <div class="thinking-row">
+              <span class="thinking-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span id="thinking-copy">Scanning the position…</span>
+            </div>
+
+            <div class="line-box">
+              <div class="line-heading"><span>PRINCIPAL VARIATION</span><span>PV</span></div>
+              <p id="engine-line">Awaiting your first move</p>
+            </div>
+          </section>
+
+          <section class="panel controls-panel">
+            <div class="panel-heading compact">
+              <div>
+                <div class="eyebrow">MATCH SETTINGS</div>
+                <h2>Make it yours</h2>
+              </div>
+              <span class="settings-icon">⌘</span>
+            </div>
+
+            <label class="control-field">
+              <span>MATCH TYPE</span>
+              <select id="mode-select">
+                <option value="ai" selected>Human vs. NovaForge</option>
+                <option value="local">Local two-player</option>
+                <option value="online">Online room</option>
+              </select>
+            </label>
+            <label class="control-field">
+              <span>TIME CONTROL</span>
+              <select id="time-control-select">
+                <option value="1+0">Bullet · 1+0</option>
+                <option value="2+1">Bullet · 2+1</option>
+                <option value="3+2">Blitz · 3+2</option>
+                <option value="5+3" selected>Blitz · 5+3</option>
+                <option value="10+0">Rapid · 10+0</option>
+                <option value="15+10">Rapid · 15+10</option>
+              </select>
+            </label>
+
+            <div id="ai-settings">
+            <label class="control-field">
+              <span>YOU PLAY</span>
+              <select id="color-select">
+                <option value="white">White · first move</option>
+                <option value="black">Black · counterpunch</option>
+              </select>
+            </label>
+            <label class="control-field">
+              <span>ENGINE MOOD</span>
+              <select id="difficulty-select">
+                <option value="pulse">Pulse · 0.7s</option>
+                <option value="forge" selected>Forge · 1.8s</option>
+                <option value="overdrive">Overdrive · 3.5s</option>
+                <option value="apex">Apex · 8.0s</option>
+              </select>
+            </label>
+            </div>
+
+            <div id="online-settings" class="online-settings" hidden>
+              <label class="control-field">
+                <span>YOUR NAME</span>
+                <input id="online-name" class="text-input" maxlength="18" value="Player" autocomplete="nickname" />
+              </label>
+              <label class="control-field">
+                <span>ROOM CODE</span>
+                <input id="room-code" class="text-input room-code-input" maxlength="8" placeholder="ABCD" autocomplete="off" />
+              </label>
+              <div class="button-row online-button-row">
+                <button id="create-room" class="button button-primary" type="button"><span>CREATE ROOM</span><b>+</b></button>
+                <button id="join-room" class="button button-secondary" type="button"><span>JOIN ROOM</span><b>↗</b></button>
+              </div>
+              <div id="online-room-status" class="online-room-status">Start a room or enter an invite code.</div>
+              <div id="online-actions" class="online-actions" hidden>
+                <div class="online-actions-heading">ROOM ACTIONS</div>
+                <div id="online-action-status" class="online-action-status">Waiting for both players to connect.</div>
+                <div class="button-row online-action-row">
+                  <button id="offer-draw" class="button button-secondary" type="button"><span>OFFER DRAW</span><b>♢</b></button>
+                  <button id="accept-draw" class="button button-primary" type="button" hidden><span>ACCEPT DRAW</span><b>✓</b></button>
+                </div>
+                <div id="claimable-draws" class="claimable-draws" hidden></div>
+                <div id="rematch-panel" class="rematch-panel" hidden>
+                  <div class="rematch-meta"><span>REMATCH VOTES</span><strong id="rematch-votes">0/2 · NONE</strong></div>
+                  <button id="rematch-game" class="button button-primary rematch-button" type="button"><span>REQUEST REMATCH</span><b>↻</b></button>
+                </div>
+                <button id="resign-game" class="text-button online-resign" type="button">⚑ &nbsp; RESIGN GAME</button>
+              </div>
+             </div>
+
+            <div class="button-row">
+              <button id="new-game" class="button button-primary" type="button">
+                <span>NEW MATCH</span><b>↗</b>
+              </button>
+              <button id="undo-move" class="button button-secondary" type="button">
+                <span>UNDO</span><b>↶</b>
+              </button>
+            </div>
+            <button id="flip-board" class="text-button" type="button">⇄ &nbsp; FLIP BOARD</button>
+          </section>
+
+          <section class="panel history-panel">
+            <div class="panel-heading compact history-heading">
+              <div>
+                <div class="eyebrow">THE TAPE</div>
+                <h2>Move history</h2>
+              </div>
+              <span id="move-count" class="move-count">0 PLIES</span>
+            </div>
+            <div id="move-history" class="move-history" aria-live="polite">
+              <div class="history-empty">Your first move will live here.</div>
+            </div>
+          </section>
+
+          <div class="tip-card">
+            <span class="tip-icon">✦</span>
+            <div>
+              <strong>POWER TIP</strong>
+              <p>Click a piece to see every legal escape. Gold squares are your invitations.</p>
+            </div>
+          </div>
+        </aside>
+      </main>
+
+      <footer class="site-footer">
+        <span>BUILT FOR HUMANS WHO LIKE THEIR CHESS SHARP</span>
+        <span>CASTLING · EN PASSANT · PROMOTION · CHECKMATE</span>
+      </footer>
+    </div>
+
+    <div id="promotion-modal" class="modal-backdrop" hidden>
+      <div class="promotion-modal" role="dialog" aria-modal="true" aria-labelledby="promotion-title">
+        <div class="eyebrow">FINAL RANK</div>
+        <h2 id="promotion-title">Choose your upgrade</h2>
+        <p>A pawn made it through. Give it a new shape.</p>
+        <div id="promotion-options" class="promotion-options"></div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

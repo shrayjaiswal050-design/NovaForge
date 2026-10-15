@@ -1,0 +1,16 @@
+{
+  "name": "nova-chess",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22.23.3"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node --env-file-if-exists=.env server.js"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}
