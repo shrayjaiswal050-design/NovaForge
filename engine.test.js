@@ -29,6 +29,50 @@ test('finds a mate in one and reports a mate score', () => {
   assert.ok(result.pv.length >= 1);
   const next = applyMove(state, result.move);
   assert.equal(getGameStatus(next).phase, 'checkmate');
+  for (const variationSeed of [1, 2, 3]) {
+    const seeded = searchBestMove(state, { timeMs: 700, maxDepth: 1, variationSeed });
+    assert.equal(seeded.score.mate, 1);
+    assert.equal(getGameStatus(applyMove(state, seeded.move)).phase, 'checkmate');
+  }
+});
+
+test('varies equivalent root choices by seed while keeping each seed deterministic', () => {
+  const state = play(createInitialState(), 'e2e4', 'e7e5');
+  const limits = { nodes: 1_500, maxDepth: 3, infinite: true, variationMargin: 18 };
+  const first = searchBestMove(state, { ...limits, variationSeed: 1 });
+  const repeat = searchBestMove(state, { ...limits, variationSeed: 1 });
+  const choices = new Set();
+  for (let seed = 1; seed <= 12; seed += 1) {
+    const result = searchBestMove(state, { ...limits, variationSeed: seed });
+    assert.ok(result.move, 'seeded search returns a move');
+    assert.ok(uciToMove(state, moveToUci(result.move)), 'seeded move is legal');
+    choices.add(moveToUci(result.move));
+  }
+  assert.equal(moveToUci(first.move), moveToUci(repeat.move));
+  assert.deepEqual(first.pv, repeat.pv);
+  assert.ok(choices.size >= 2, `expected seeded variety, got ${[...choices].join(', ')}`);
+});
+
+test('zero variation margin preserves the strongest root score', () => {
+  const state = play(createInitialState(), 'e2e4', 'e7e5');
+  const limits = {
+    infinite: true,
+    nodes: 2_500,
+    maxDepth: 3,
+    variationSeed: 9,
+  };
+  const strongest = searchBestMove(state, { ...limits, variationMargin: 0 });
+  const varied = searchBestMove(state, { ...limits, variationMargin: 18 });
+  const numericScore = (score) => typeof score?.mate === 'number'
+    ? Math.sign(score.mate) * (32_000 - Math.abs(score.mate))
+    : score?.cp ?? 0;
+
+  assert.ok(strongest.move);
+  assert.ok(varied.move);
+  assert.ok(
+    numericScore(strongest.score) >= numericScore(varied.score),
+    `zero-margin score ${numericScore(strongest.score)} should not trail varied score ${numericScore(varied.score)}`,
+  );
 });
 
 test('searches legal check evasions instead of standing pat', () => {

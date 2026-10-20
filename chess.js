@@ -110,6 +110,110 @@ export function createInitialState() {
   return state;
 }
 
+const CHESS960_POSITION_COUNT = 960;
+const CHESS960_DARK_BISHOP_FILES = [0, 2, 4, 6];
+const CHESS960_LIGHT_BISHOP_FILES = [1, 3, 5, 7];
+const CHESS960_KNIGHT_PAIRS = [
+  [0, 1], [0, 2], [0, 3], [0, 4], [1, 2],
+  [1, 3], [1, 4], [2, 3], [2, 4], [3, 4],
+];
+
+function normalizeChess960Seed(seed) {
+  if (!Number.isSafeInteger(seed)) throw new Error('Chess960 seed must be a safe integer.');
+  return ((seed % CHESS960_POSITION_COUNT) + CHESS960_POSITION_COUNT) % CHESS960_POSITION_COUNT;
+}
+
+function generateChess960BackRank(seed) {
+  let position = normalizeChess960Seed(seed);
+  const backRank = new Array(8).fill(0);
+
+  const lightBishopFile = CHESS960_LIGHT_BISHOP_FILES[position % 4];
+  backRank[lightBishopFile] = BISHOP;
+  position = Math.floor(position / 4);
+
+  const darkBishopFile = CHESS960_DARK_BISHOP_FILES[position % 4];
+  backRank[darkBishopFile] = BISHOP;
+  position = Math.floor(position / 4);
+
+  let openFiles = backRank.map((piece, file) => (piece ? -1 : file)).filter((file) => file >= 0);
+  const queenFile = openFiles[position % 6];
+  backRank[queenFile] = QUEEN;
+  position = Math.floor(position / 6);
+
+  openFiles = backRank.map((piece, file) => (piece ? -1 : file)).filter((file) => file >= 0);
+  const [firstKnight, secondKnight] = CHESS960_KNIGHT_PAIRS[position];
+  backRank[openFiles[firstKnight]] = KNIGHT;
+  backRank[openFiles[secondKnight]] = KNIGHT;
+
+  openFiles = backRank.map((piece, file) => (piece ? -1 : file)).filter((file) => file >= 0);
+  backRank[openFiles[0]] = ROOK;
+  backRank[openFiles[1]] = KING;
+  backRank[openFiles[2]] = ROOK;
+  return backRank;
+}
+
+function createChess960Homes(backRank) {
+  const kingFile = backRank.indexOf(KING);
+  const rookFiles = backRank
+    .map((piece, file) => (piece === ROOK ? file : -1))
+    .filter((file) => file >= 0)
+    .sort((a, b) => a - b);
+  if (kingFile < 0 || rookFiles.length !== 2 || rookFiles[0] >= kingFile || rookFiles[1] <= kingFile) {
+    throw new Error('Chess960 back rank must place the king between the rooks.');
+  }
+  return {
+    king: {
+      [WHITE]: squareOf(kingFile, 0),
+      [BLACK]: squareOf(kingFile, 7),
+    },
+    rooks: {
+      [WHITE]: {
+        queenSide: squareOf(rookFiles[0], 0),
+        kingSide: squareOf(rookFiles[1], 0),
+      },
+      [BLACK]: {
+        queenSide: squareOf(rookFiles[0], 7),
+        kingSide: squareOf(rookFiles[1], 7),
+      },
+    },
+  };
+}
+
+export function createChess960State(seed = 518) {
+  const backRank = generateChess960BackRank(seed);
+  const board = emptyBoard();
+  for (let file = 0; file < 8; file += 1) {
+    board[squareOf(file, 0)] = pieceOf(WHITE, backRank[file]);
+    board[squareOf(file, 1)] = pieceOf(WHITE, PAWN);
+    board[squareOf(file, 6)] = pieceOf(BLACK, PAWN);
+    board[squareOf(file, 7)] = pieceOf(BLACK, backRank[file]);
+  }
+  const state = {
+    board,
+    turn: WHITE,
+    castling: CASTLE_WHITE_KING | CASTLE_WHITE_QUEEN | CASTLE_BLACK_KING | CASTLE_BLACK_QUEEN,
+    ep: -1,
+    halfmove: 0,
+    fullmove: 1,
+    history: [],
+    positionCounts: new Map(),
+    lastMove: null,
+    variant: 'chess960',
+    chess960Seed: seed,
+    chess960Homes: createChess960Homes(backRank),
+  };
+  state.positionCounts.set(positionKey(state), 1);
+  return state;
+}
+
+export function createStateForVariant({ variant = 'standard', chess960Seed = 518 } = {}) {
+  if (typeof variant !== 'string') throw new Error('Variant must be a string.');
+  const normalizedVariant = variant.trim().toLowerCase();
+  if (normalizedVariant === 'standard') return createInitialState();
+  if (normalizedVariant === 'chess960') return createChess960State(chess960Seed);
+  throw new Error(`Unsupported chess variant: ${variant}`);
+}
+
 export function stateFromFEN(fen) {
   if (typeof fen !== 'string') throw new Error('FEN must be a string.');
   const fields = fen.trim().split(/\s+/);
@@ -408,7 +512,122 @@ export function effectiveEnPassantSquare(state) {
   return -1;
 }
 
+function castlingRightFor(color, side) {
+  if (color === WHITE) return side === 'kingSide' ? CASTLE_WHITE_KING : CASTLE_WHITE_QUEEN;
+  return side === 'kingSide' ? CASTLE_BLACK_KING : CASTLE_BLACK_QUEEN;
+}
+
+function chess960HomesForState(state) {
+  const storedHomes = state.chess960Homes;
+  if (storedHomes?.king && storedHomes?.rooks
+    && Number.isInteger(storedHomes.king[WHITE]) && Number.isInteger(storedHomes.king[BLACK])
+    && storedHomes.rooks[WHITE] && storedHomes.rooks[BLACK]
+    && Number.isInteger(storedHomes.rooks[WHITE].queenSide)
+    && Number.isInteger(storedHomes.rooks[WHITE].kingSide)
+    && Number.isInteger(storedHomes.rooks[BLACK].queenSide)
+    && Number.isInteger(storedHomes.rooks[BLACK].kingSide)) {
+    return storedHomes;
+  }
+
+  const homes = { king: {}, rooks: {} };
+  for (const color of [WHITE, BLACK]) {
+    const rank = color === WHITE ? 0 : 7;
+    const kingHome = state.board.findIndex((piece, square) => square >> 3 === rank && piece === pieceOf(color, KING));
+    const rookHomes = state.board
+      .map((piece, square) => (square >> 3 === rank && piece === pieceOf(color, ROOK) ? square : -1))
+      .filter((square) => square >= 0)
+      .sort((a, b) => a - b);
+    if (kingHome < 0 || rookHomes.length !== 2
+      || fileOf(rookHomes[0]) >= fileOf(kingHome) || fileOf(rookHomes[1]) <= fileOf(kingHome)) {
+      return null;
+    }
+    homes.king[color] = kingHome;
+    homes.rooks[color] = { queenSide: rookHomes[0], kingSide: rookHomes[1] };
+  }
+  return homes;
+}
+
+function chess960CastleSquares(state, color, side) {
+  const homes = chess960HomesForState(state);
+  if (!homes) return null;
+  const kingHome = homes.king[color];
+  const rookHome = homes.rooks[color][side];
+  if (!Number.isInteger(kingHome) || !Number.isInteger(rookHome)) return null;
+  const rank = color === WHITE ? 0 : 7;
+  const kingDestination = squareOf(side === 'kingSide' ? 6 : 2, rank);
+  const rookDestination = squareOf(side === 'kingSide' ? 5 : 3, rank);
+  return {
+    side,
+    right: castlingRightFor(color, side),
+    kingHome,
+    rookHome,
+    kingDestination,
+    rookDestination,
+  };
+}
+
+function rankPath(from, to) {
+  const fromFile = fileOf(from);
+  const toFile = fileOf(to);
+  const step = Math.sign(toFile - fromFile);
+  const squares = [];
+  for (let file = fromFile; ; file += step) {
+    squares.push(squareOf(file, rankOf(from)));
+    if (file === toFile) break;
+  }
+  return squares;
+}
+
+function isChess960CastlePathClear(state, color, squares) {
+  const king = pieceOf(color, KING);
+  const rook = pieceOf(color, ROOK);
+  for (const square of rankPath(squares.kingHome, squares.kingDestination)) {
+    const piece = state.board[square];
+    if (!piece || square === squares.kingHome || (square === squares.rookHome && piece === rook)) continue;
+    return false;
+  }
+  for (const square of rankPath(squares.rookHome, squares.rookDestination)) {
+    const piece = state.board[square];
+    if (!piece || square === squares.rookHome || (square === squares.kingHome && piece === king)) continue;
+    return false;
+  }
+  return state.board[squares.kingHome] === king && state.board[squares.rookHome] === rook;
+}
+
+function isChess960CastleSafe(state, color, squares) {
+  const enemy = color === WHITE ? BLACK : WHITE;
+  if (isSquareAttacked(state, squares.kingHome, enemy)) return false;
+
+  for (const square of rankPath(squares.kingHome, squares.kingDestination).slice(1, -1)) {
+    const board = state.board.slice();
+    board[squares.kingHome] = 0;
+    if (isSquareAttacked({ ...state, board }, square, enemy)) return false;
+  }
+
+  const finalBoard = state.board.slice();
+  finalBoard[squares.kingHome] = 0;
+  finalBoard[squares.rookHome] = 0;
+  finalBoard[squares.rookDestination] = 0;
+  finalBoard[squares.kingDestination] = pieceOf(color, KING);
+  return !isSquareAttacked({ ...state, board: finalBoard }, squares.kingDestination, enemy);
+}
+
+function addChess960CastleMoves(state, moves, from, color) {
+  for (const side of ['kingSide', 'queenSide']) {
+    const squares = chess960CastleSquares(state, color, side);
+    if (!squares || from !== squares.kingHome || !(state.castling & squares.right)) continue;
+    if (!isChess960CastlePathClear(state, color, squares)) continue;
+    if (isChess960CastleSafe(state, color, squares)) {
+      moves.push(move(from, squares.kingDestination, MOVE_CASTLE));
+    }
+  }
+}
+
 function addCastleMoves(state, moves, from, color) {
+  if (state.variant === 'chess960') {
+    addChess960CastleMoves(state, moves, from, color);
+    return;
+  }
   const enemy = color === WHITE ? BLACK : WHITE;
   const rank = color === WHITE ? 0 : 7;
   const kingHome = squareOf(4, rank);
@@ -502,7 +721,7 @@ export function generatePseudoMoves(state) {
   return moves;
 }
 
-function updateCastlingRights(castling, from, to, movingPiece, capturedPiece) {
+function updateStandardCastlingRights(castling, from, to, movingPiece, capturedPiece) {
   const movingType = typeOf(movingPiece);
   if (movingType === KING) {
     castling &= colorOf(movingPiece) === WHITE
@@ -525,35 +744,90 @@ function updateCastlingRights(castling, from, to, movingPiece, capturedPiece) {
   return castling;
 }
 
+function updateChess960CastlingRights(state, from, to, movingPiece, capturedPiece) {
+  let castling = state.castling;
+  const movingColor = colorOf(movingPiece);
+  const homes = chess960HomesForState(state);
+  if (!homes || movingColor === null) return castling;
+
+  if (typeOf(movingPiece) === KING) {
+    castling &= movingColor === WHITE
+      ? ~(CASTLE_WHITE_KING | CASTLE_WHITE_QUEEN)
+      : ~(CASTLE_BLACK_KING | CASTLE_BLACK_QUEEN);
+  }
+  if (typeOf(movingPiece) === ROOK) {
+    for (const side of ['kingSide', 'queenSide']) {
+      if (from === homes.rooks[movingColor][side]) castling &= ~castlingRightFor(movingColor, side);
+    }
+  }
+  if (capturedPiece && typeOf(capturedPiece) === ROOK) {
+    const capturedColor = colorOf(capturedPiece);
+    for (const side of ['kingSide', 'queenSide']) {
+      if (to === homes.rooks[capturedColor][side]) castling &= ~castlingRightFor(capturedColor, side);
+    }
+  }
+  return castling;
+}
+
+function updateCastlingRights(state, from, to, movingPiece, capturedPiece) {
+  return state.variant === 'chess960'
+    ? updateChess960CastlingRights(state, from, to, movingPiece, capturedPiece)
+    : updateStandardCastlingRights(state.castling, from, to, movingPiece, capturedPiece);
+}
+
+function isChess960CastleAlias(state, candidate, from, to) {
+  if (state.variant !== 'chess960' || !(candidate.flags & MOVE_CASTLE)) return false;
+  for (const side of ['kingSide', 'queenSide']) {
+    const squares = chess960CastleSquares(state, state.turn, side);
+    if (squares && candidate.from === squares.kingHome && candidate.to === squares.kingDestination
+      && from === squares.kingHome && to === squares.rookHome) return true;
+  }
+  return false;
+}
+
 export function applyMove(state, selectedMove, options = {}) {
   const moveToApply = selectedMove;
   const board = state.board.slice();
   const movingPiece = board[moveToApply.from];
   const movingColor = colorOf(movingPiece);
   let capturedPiece = board[moveToApply.to];
-  board[moveToApply.from] = 0;
-  if (moveToApply.flags & MOVE_EN_PASSANT) {
-    const capturedSquare = moveToApply.to + (movingColor === WHITE ? -8 : 8);
-    capturedPiece = board[capturedSquare];
-    board[capturedSquare] = 0;
-  }
   const placedPiece = moveToApply.promotion ? pieceOf(movingColor, moveToApply.promotion) : movingPiece;
-  board[moveToApply.to] = placedPiece;
-  if (moveToApply.flags & MOVE_CASTLE) {
-    const rank = rankOf(moveToApply.from);
-    if (fileOf(moveToApply.to) === 6) {
-      board[squareOf(5, rank)] = board[squareOf(7, rank)];
-      board[squareOf(7, rank)] = 0;
-    } else {
-      board[squareOf(3, rank)] = board[squareOf(0, rank)];
-      board[squareOf(0, rank)] = 0;
+  const isChess960Castle = state.variant === 'chess960' && (moveToApply.flags & MOVE_CASTLE);
+  const chess960Castle = isChess960Castle
+    ? chess960CastleSquares(state, movingColor, fileOf(moveToApply.to) === 6 ? 'kingSide' : 'queenSide')
+    : null;
+
+  if (chess960Castle) {
+    const rookPiece = board[chess960Castle.rookHome];
+    capturedPiece = 0;
+    board[chess960Castle.kingHome] = 0;
+    board[chess960Castle.rookHome] = 0;
+    board[chess960Castle.kingDestination] = placedPiece;
+    board[chess960Castle.rookDestination] = rookPiece;
+  } else {
+    board[moveToApply.from] = 0;
+    if (moveToApply.flags & MOVE_EN_PASSANT) {
+      const capturedSquare = moveToApply.to + (movingColor === WHITE ? -8 : 8);
+      capturedPiece = board[capturedSquare];
+      board[capturedSquare] = 0;
+    }
+    board[moveToApply.to] = placedPiece;
+    if (moveToApply.flags & MOVE_CASTLE) {
+      const rank = rankOf(moveToApply.from);
+      if (fileOf(moveToApply.to) === 6) {
+        board[squareOf(5, rank)] = board[squareOf(7, rank)];
+        board[squareOf(7, rank)] = 0;
+      } else {
+        board[squareOf(3, rank)] = board[squareOf(0, rank)];
+        board[squareOf(0, rank)] = 0;
+      }
     }
   }
   const next = {
     ...state,
     board,
     turn: state.turn === WHITE ? BLACK : WHITE,
-    castling: updateCastlingRights(state.castling, moveToApply.from, moveToApply.to, movingPiece, capturedPiece),
+    castling: updateCastlingRights(state, moveToApply.from, moveToApply.to, movingPiece, capturedPiece),
     ep: moveToApply.flags & MOVE_DOUBLE_PAWN
       ? (moveToApply.from + moveToApply.to) / 2
       : -1,
@@ -585,8 +859,10 @@ export function getLegalMoves(state) {
 }
 
 export function findMove(state, from, to, promotion = 0) {
-  return getLegalMoves(state).find((candidate) => candidate.from === from && candidate.to === to
-    && (!candidate.promotion || candidate.promotion === promotion || !promotion));
+  const legalMoves = getLegalMoves(state);
+  return legalMoves.find((candidate) => candidate.from === from && candidate.to === to
+    && (!candidate.promotion || candidate.promotion === promotion || !promotion))
+    || (promotion === 0 && legalMoves.find((candidate) => isChess960CastleAlias(state, candidate, from, to)));
 }
 
 export function moveToUci(moveToFormat) {
@@ -600,14 +876,25 @@ export function uciToMove(state, uci) {
   const to = parseSquare(uci.slice(2, 4));
   const promotionLetter = uci[4]?.toLowerCase();
   const promotion = { q: QUEEN, r: ROOK, b: BISHOP, n: KNIGHT }[promotionLetter] || 0;
-  return getLegalMoves(state).find((candidate) => candidate.from === from && candidate.to === to && candidate.promotion === promotion) || null;
+  const legalMoves = getLegalMoves(state);
+  return legalMoves.find((candidate) => candidate.from === from && candidate.to === to && candidate.promotion === promotion)
+    || legalMoves.find((candidate) => promotion === 0 && isChess960CastleAlias(state, candidate, from, to))
+    || null;
 }
 
 export function positionKey(state) {
   // FIDE repetition identity includes en-passant only when that capture is legal.
   // effectiveEnPassantSquare performs the king-safety check directly so key
   // construction never calls the public move generator recursively.
-  return `${state.board.join(',')}|${state.turn}|${state.castling}|${effectiveEnPassantSquare(state)}`;
+  let variantKey = '';
+  if (state.variant === 'chess960') {
+    const homes = chess960HomesForState(state);
+    const homeKey = homes
+      ? `${homes.king[WHITE]},${homes.king[BLACK]}|${homes.rooks[WHITE].queenSide},${homes.rooks[WHITE].kingSide}|${homes.rooks[BLACK].queenSide},${homes.rooks[BLACK].kingSide}`
+      : '';
+    variantKey = `|chess960|${homeKey}`;
+  }
+  return `${state.board.join(',')}|${state.turn}|${state.castling}|${effectiveEnPassantSquare(state)}${variantKey}`;
 }
 
 export function hasInsufficientMaterial(state) {

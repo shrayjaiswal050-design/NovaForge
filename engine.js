@@ -443,6 +443,12 @@ class Searcher {
     this.timeMs = limits.infinite ? Infinity : Math.max(1, Number.isFinite(Number(limits.timeMs)) ? Number(limits.timeMs) : 1200);
     this.deadline = this.timeMs === Infinity ? Infinity : this.start + this.timeMs;
     this.nodeLimit = Number.isFinite(Number(limits.nodes)) ? Math.max(1, Math.floor(Number(limits.nodes))) : Infinity;
+    const variationSeed = Number(limits.variationSeed);
+    this.variationSeed = Number.isSafeInteger(variationSeed) ? variationSeed >>> 0 : null;
+    const variationMargin = Number(limits.variationMargin);
+    this.variationMargin = Number.isFinite(variationMargin)
+      ? Math.max(0, Math.min(40, variationMargin))
+      : 18;
     this.onInfo = typeof onInfo === 'function' ? onInfo : () => {};
     this.nodes = 0;
     this.table = new Map();
@@ -450,8 +456,8 @@ class Searcher {
     this.history = new Map();
     this.pvTable = [];
     this.repetitionCounts = normaliseCounts(root.positionCounts || root.repetitionCounts);
-    const rootKey = positionKey(root);
-    if (!this.repetitionCounts.has(rootKey)) this.repetitionCounts.set(rootKey, 1);
+    this.rootKey = positionKey(root);
+    if (!this.repetitionCounts.has(this.rootKey)) this.repetitionCounts.set(this.rootKey, 1);
     this.keyTokens = new Map();
     this.contextHash = [0, 0];
     for (const [key, count] of this.repetitionCounts) {
@@ -459,7 +465,7 @@ class Searcher {
       this.keyTokens.set(key, token);
       this.contextHash = addHashTerm(this.contextHash, token, count);
     }
-    this.rootOccurrence = this.repetitionCounts.get(rootKey) || 1;
+    this.rootOccurrence = this.repetitionCounts.get(this.rootKey) || 1;
   }
 
   checkTime() {
@@ -500,14 +506,14 @@ class Searcher {
     const childKey = positionKey(child);
     this.pushPosition(childKey);
     try {
-      return callback(child);
+      return callback(child, childKey);
     } finally {
       this.popPosition(childKey);
     }
   }
 
-  currentCount(state) {
-    return this.repetitionCounts.get(positionKey(state)) || 1;
+  currentCount(state, stateKey = null) {
+    return this.repetitionCounts.get(stateKey || positionKey(state)) || 1;
   }
 
   isAutomaticDraw(state, count = this.currentCount(state)) {
@@ -518,12 +524,12 @@ class Searcher {
     return count >= 3 || state.halfmove >= 100;
   }
 
-  ttKey(state) {
-    return `${positionKey(state)}|${state.halfmove}|${this.contextHash[0].toString(16)}:${this.contextHash[1].toString(16)}`;
+  ttKey(state, stateKey = null) {
+    return `${stateKey || positionKey(state)}|${state.halfmove}|${this.contextHash[0].toString(16)}:${this.contextHash[1].toString(16)}`;
   }
 
-  probeTable(state, depth, ply, alpha, beta) {
-    const entry = this.table.get(this.ttKey(state));
+  probeTable(tableKey, depth, ply, alpha, beta) {
+    const entry = this.table.get(tableKey);
     if (!entry || entry.depth < depth) return { entry, alpha, beta, score: null };
     const score = scoreFromTable(entry.score, ply);
     this.pvTable[ply] = entry.pv?.slice(0, MAX_PV_LENGTH) || (entry.best ? [entry.best] : []);
@@ -568,7 +574,20 @@ class Searcher {
     }
     if (killerMoves.includes(uci)) score += 8_000;
     score += this.history.get(uci) || 0;
+    if (ply === 0 && this.variationSeed !== null) score += this.variationValue(uci) * 0.001;
     return score - ply * 0.001;
+  }
+
+  variationValue(token) {
+    return hashText(`${this.variationSeed}:${token}`, this.variationSeed ^ 0x9e3779b9) / 0xffffffff;
+  }
+
+  variedRootCandidate(candidates, bestScore) {
+    if (this.variationSeed === null || isMateScore(bestScore) || candidates.length < 2) return null;
+    const nearBest = candidates.filter((candidate) => candidate.score >= bestScore - this.variationMargin);
+    if (nearBest.length < 2) return null;
+    const pick = Math.floor(this.variationValue(`pick:${this.ttKey(this.root, this.rootKey)}`) * nearBest.length);
+    return nearBest[pick] || nearBest[0];
   }
 
   rememberKiller(move, ply) {
@@ -583,20 +602,21 @@ class Searcher {
     this.history.set(uci, Math.max(-10000, Math.min(10000, old + depth * depth)));
   }
 
-  negamax(state, depth, alpha, beta, ply, allowNull = true) {
+  negamax(state, depth, alpha, beta, ply, allowNull = true, stateKey = null) {
     this.nodes += 1;
     this.checkTime();
     this.pvTable[ply] = [];
 
-    if (depth <= 0) return this.quiescence(state, alpha, beta, ply, 0);
+    const resolvedStateKey = stateKey || positionKey(state);
+    if (depth <= 0) return this.quiescence(state, alpha, beta, ply, 0, resolvedStateKey);
 
-    const count = this.currentCount(state);
+    const count = this.currentCount(state, resolvedStateKey);
     const claimable = this.isClaimableDraw(state, count);
     if (claimable && alpha < 0) alpha = 0;
     const originalAlpha = alpha;
     const originalBeta = beta;
-    const tableKey = this.ttKey(state);
-    const cached = this.probeTable(state, depth, ply, alpha, beta);
+    const tableKey = this.ttKey(state, resolvedStateKey);
+    const cached = this.probeTable(tableKey, depth, ply, alpha, beta);
     alpha = cached.alpha;
     beta = cached.beta;
     if (cached.score !== null) return cached.score;
@@ -623,7 +643,7 @@ class Searcher {
       // Do not let a synthetic pass inherit an actual repetition occurrence.
       // That would turn a null move into an unsafe draw claim.
       if (!this.repetitionCounts.has(nullKey)) {
-        const nullScore = -this.negamax(nullState, nullDepth, -beta, -beta + 1, ply + 1, false);
+        const nullScore = -this.negamax(nullState, nullDepth, -beta, -beta + 1, ply + 1, false, nullKey);
         if (nullScore >= beta) return nullScore;
       }
     }
@@ -636,16 +656,16 @@ class Searcher {
     for (let index = 0; index < ordered.length; index += 1) {
       this.checkTime();
       const candidate = ordered[index];
-      const score = this.searchChild(state, candidate, (child) => {
+      const score = this.searchChild(state, candidate, (child, childKey) => {
         if (index === 0) {
-          return -this.negamax(child, depth - 1, -beta, -alpha, ply + 1);
+          return -this.negamax(child, depth - 1, -beta, -alpha, ply + 1, true, childKey);
         }
         const quiet = !isCapture(candidate) && !isPromotion(candidate);
         const late = index >= 4 && depth >= 5 && quiet && !inCheck;
         const reduction = late ? (depth >= 10 ? 2 : 1) : 0;
-        let reducedWindowScore = -this.negamax(child, depth - 1 - reduction, -alpha - 1, -alpha, ply + 1);
+        let reducedWindowScore = -this.negamax(child, depth - 1 - reduction, -alpha - 1, -alpha, ply + 1, true, childKey);
         if (reducedWindowScore > alpha && reducedWindowScore < beta) {
-          reducedWindowScore = -this.negamax(child, depth - 1, -beta, -alpha, ply + 1);
+          reducedWindowScore = -this.negamax(child, depth - 1, -beta, -alpha, ply + 1, true, childKey);
         }
         return reducedWindowScore;
       });
@@ -674,12 +694,13 @@ class Searcher {
     return bestScore;
   }
 
-  quiescence(state, alpha, beta, ply, quietDepth) {
+  quiescence(state, alpha, beta, ply, quietDepth, stateKey = null) {
     this.nodes += 1;
     this.checkTime();
     this.pvTable[ply] = [];
 
-    const count = this.currentCount(state);
+    const resolvedStateKey = stateKey || positionKey(state);
+    const count = this.currentCount(state, resolvedStateKey);
     const legalMoves = getLegalMoves(state);
     if (!legalMoves.length) return isInCheck(state) ? -MATE_SCORE + ply : 0;
     if (this.isAutomaticDraw(state, count)) return 0;
@@ -715,8 +736,8 @@ class Searcher {
     for (const candidate of ordered) {
       this.checkTime();
       const cachedChild = tactical.find((entry) => entry.candidate === candidate)?.child;
-      const score = this.searchChildWithState(state, candidate, cachedChild, (child) => (
-        -this.quiescence(child, -beta, -alpha, ply + 1, quietDepth + 1)
+      const score = this.searchChildWithState(state, candidate, cachedChild, (child, childKey) => (
+        -this.quiescence(child, -beta, -alpha, ply + 1, quietDepth + 1, childKey)
       ));
       const childLine = this.pvTable[ply + 1] || [];
       if (score > bestScore) {
@@ -739,7 +760,7 @@ class Searcher {
     const childKey = positionKey(next);
     this.pushPosition(childKey);
     try {
-      return callback(next);
+      return callback(next, childKey);
     } finally {
       this.popPosition(childKey);
     }
@@ -750,28 +771,33 @@ class Searcher {
     this.pvTable[0] = [];
     const originalAlpha = alpha;
     const originalBeta = beta;
-    const rootClaimable = this.isClaimableDraw(this.root, this.currentCount(this.root));
+    const rootCount = this.currentCount(this.root, this.rootKey);
+    const rootClaimable = this.isClaimableDraw(this.root, rootCount);
     if (rootClaimable) alpha = Math.max(alpha, 0);
-    const cached = this.table.get(this.ttKey(this.root));
+    const rootTableKey = this.ttKey(this.root, this.rootKey);
+    const cached = this.table.get(rootTableKey);
     const ordered = this.orderMoves(this.root, legalMoves, cached?.best || '', 0);
     let bestScore = rootClaimable ? 0 : -INFINITY;
     let bestMove = ordered[0];
     let bestLine = [moveToUci(bestMove)];
+    const candidates = [];
 
     for (let index = 0; index < ordered.length; index += 1) {
       this.checkTime();
       const candidate = ordered[index];
-      const score = this.searchChild(this.root, candidate, (child) => {
-        if (index === 0) return -this.negamax(child, depth - 1, -beta, -alpha, 1);
-        let result = -this.negamax(child, depth - 1, -alpha - 1, -alpha, 1);
-        if (result > alpha && result < beta) result = -this.negamax(child, depth - 1, -beta, -alpha, 1);
+      const score = this.searchChild(this.root, candidate, (child, childKey) => {
+        if (index === 0) return -this.negamax(child, depth - 1, -beta, -alpha, 1, true, childKey);
+        let result = -this.negamax(child, depth - 1, -alpha - 1, -alpha, 1, true, childKey);
+        if (result > alpha && result < beta) result = -this.negamax(child, depth - 1, -beta, -alpha, 1, true, childKey);
         return result;
       });
       const childLine = this.pvTable[1] || [];
+      const candidateLine = [moveToUci(candidate), ...childLine].slice(0, MAX_PV_LENGTH);
+      candidates.push({ move: candidate, score, line: candidateLine });
       if (score > bestScore) {
         bestScore = score;
         bestMove = candidate;
-        bestLine = [moveToUci(candidate), ...childLine].slice(0, MAX_PV_LENGTH);
+        bestLine = candidateLine;
       }
       if (score > alpha) {
         alpha = score;
@@ -786,9 +812,17 @@ class Searcher {
       }
     }
 
+    const varied = this.variedRootCandidate(candidates, bestScore);
+    if (varied) {
+      bestMove = varied.move;
+      bestScore = varied.score;
+      bestLine = varied.line;
+      this.pvTable[0] = varied.line.slice();
+    }
+
     if (!this.pvTable[0].length) this.pvTable[0] = bestLine;
     const flag = bestScore <= originalAlpha ? 'upper' : bestScore >= originalBeta ? 'lower' : 'exact';
-    this.storeTable(this.ttKey(this.root), depth, bestScore, flag, bestMove, 0);
+    this.storeTable(rootTableKey, depth, bestScore, flag, bestMove, 0);
     return { move: bestMove, score: bestScore, pv: this.pvTable[0].slice(0, MAX_PV_LENGTH) };
   }
 

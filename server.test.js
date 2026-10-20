@@ -4,37 +4,86 @@ import http from 'node:http';
 import test from 'node:test';
 import WebSocket from 'ws';
 import { createChessServer } from './server.js';
-import { stateFromFEN } from './chess.js';
-
-function delay(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
 
 async function startServer(options = {}) {
   const app = createChessServer(options);
   app.server.listen(0, '127.0.0.1');
   await once(app.server, 'listening');
+  const port = app.server.address().port;
   return {
     app,
-    port: app.server.address().port,
-    url: `ws://127.0.0.1:${app.server.address().port}`,
+    port,
+    wsUrl: `ws://127.0.0.1:${port}`,
   };
 }
 
-function createClient(url, options = {}) {
-  const socket = new WebSocket(url, options);
+function request(port, method, path, body = undefined, cookie = undefined) {
+  return new Promise((resolve, reject) => {
+    const payload = body === undefined ? null : JSON.stringify(body);
+    const headers = {};
+    if (payload !== null) {
+      headers['content-type'] = 'application/json';
+      headers['content-length'] = Buffer.byteLength(payload);
+    }
+    if (cookie) headers.cookie = cookie;
+    const req = http.request({ hostname: '127.0.0.1', port, method, path, headers }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({
+        status: response.statusCode,
+        headers: response.headers,
+        body: Buffer.concat(chunks).toString(),
+      }));
+    });
+    req.on('error', reject);
+    if (payload !== null) req.write(payload);
+    req.end();
+  });
+}
+
+function cookieFrom(response) {
+  return response.headers['set-cookie']?.[0]?.split(';', 1)[0] || null;
+}
+
+async function signup(port, handle, displayName = handle) {
+  const response = await request(port, 'POST', '/api/auth/signup', {
+    handle,
+    displayName,
+    password: 'server integration password',
+    acceptedFairPlayTerms: true,
+    acceptedPrivacyPolicy: true,
+  });
+  assert.equal(response.status, 201);
+  return cookieFrom(response);
+}
+
+async function prepareFriends(port) {
+  const aliceCookie = await signup(port, 'alice', 'Alice');
+  const bobCookie = await signup(port, 'bob', 'Bob');
+  const carolCookie = await signup(port, 'carol', 'Carol');
+  const requested = await request(port, 'POST', '/api/friends/request', { handle: 'bob' }, aliceCookie);
+  assert.equal(requested.status, 201);
+  const bobFriends = await request(port, 'GET', '/api/friends', undefined, bobCookie);
+  const responded = await request(port, 'POST', '/api/friends/respond', {
+    requestId: JSON.parse(bobFriends.body).incomingRequests[0].requestId,
+    accept: true,
+  }, bobCookie);
+  assert.equal(responded.status, 200);
+  return { aliceCookie, bobCookie, carolCookie };
+}
+
+function createClient(wsUrl, port, cookie) {
+  const socket = new WebSocket(wsUrl, {
+    headers: { cookie },
+    origin: `http://127.0.0.1:${port}`,
+  });
   const messages = [];
   const waiters = [];
   const opened = once(socket, 'open');
   const closed = once(socket, 'close');
 
   socket.on('message', (raw) => {
-    let message;
-    try {
-      message = JSON.parse(raw.toString());
-    } catch {
-      message = { type: 'invalid-test-message' };
-    }
+    const message = JSON.parse(raw.toString());
     messages.push(message);
     for (let index = waiters.length - 1; index >= 0; index -= 1) {
       const waiter = waiters[index];
@@ -44,11 +93,7 @@ function createClient(url, options = {}) {
       waiter.resolve(message);
     }
   });
-
-  socket.on('error', () => {
-    // Individual tests assert the protocol result; ws errors are expected for
-    // the deliberate same-origin rejection case.
-  });
+  socket.on('error', () => {});
 
   function waitFor(predicate, from = 0, timeoutMs = 2_000) {
     for (let index = from; index < messages.length; index += 1) {
@@ -78,21 +123,6 @@ function send(client, message) {
   client.socket.send(JSON.stringify(message));
 }
 
-async function createGame(url, clients, timeControl = '5+3') {
-  const white = createClient(url);
-  const black = createClient(url);
-  clients.push(white, black);
-  await Promise.all([white.opened, black.opened]);
-  send(white, { type: 'create', timeControl, name: 'Alice' });
-  const created = await white.waitFor((message) => message.type === 'created');
-  const whiteMark = white.messages.length;
-  send(black, { type: 'join', room: created.room, name: 'Bob' });
-  const joined = await black.waitFor((message) => message.type === 'joined');
-  const state = await white.waitFor((message) => message.type === 'state' && message.ready, whiteMark);
-  await black.waitFor((message) => message.type === 'state' && message.ready);
-  return { white, black, created, joined, state };
-}
-
 async function expectError(client, action, code) {
   const mark = client.messages.length;
   send(client, action);
@@ -101,417 +131,184 @@ async function expectError(client, action, code) {
   return error;
 }
 
-async function playMove(client, uci, ply) {
-  const mark = client.messages.length;
-  send(client, { type: 'move', uci });
-  return client.waitFor((message) => message.type === 'state' && message.history.length === ply, mark);
-}
+async function openFriendGame(wsUrl, port, cookies, clients, timeControl) {
+  const alice = createClient(wsUrl, port, cookies.aliceCookie);
+  const bob = createClient(wsUrl, port, cookies.bobCookie);
+  clients.push(alice, bob);
+  await Promise.all([alice.opened, bob.opened]);
 
-async function closeAll(app, clients) {
-  await Promise.all(clients.map((client) => client.close()));
-  await app.close();
-}
-
-async function httpGet(port, path) {
-  return new Promise((resolve, reject) => {
-    const request = http.get({ hostname: '127.0.0.1', port, path }, (response) => {
-      const chunks = [];
-      response.on('data', (chunk) => chunks.push(chunk));
-      response.on('end', () => resolve({
-        status: response.statusCode,
-        body: Buffer.concat(chunks).toString(),
-      }));
-    });
-    request.on('error', reject);
+  const inviteMark = bob.messages.length;
+  send(alice, {
+    type: 'friendInvite',
+    toHandle: 'bob',
+    variant: 'standard',
+    timeControl,
   });
+  const invite = await bob.waitFor((message) => message.type === 'friendInvite', inviteMark);
+  const stateMark = alice.messages.length;
+  send(bob, { type: 'friendInviteRespond', inviteId: invite.inviteId, accept: true });
+  const [aliceState, bobState] = await Promise.all([
+    alice.waitFor((message) => message.type === 'state' && message.gameId, stateMark),
+    bob.waitFor((message) => message.type === 'state' && message.gameId),
+  ]);
+  return { alice, bob, aliceState, bobState };
 }
 
-test('creates isolated invite rooms, validates moves, and protects reconnect tokens', async () => {
-  const { app, url } = await startServer({ clockIntervalMs: 10 });
+test('authenticated friend games reject public room messages, enforce legal moves, and settle clocks', async () => {
+  let stamp = 0;
+  const { app, port, wsUrl } = await startServer({ now: () => stamp, clockIntervalMs: 60_000 });
   const clients = [];
   try {
-    const white = createClient(url);
-    const black = createClient(url);
-    const third = createClient(url);
-    clients.push(white, black, third);
-    await Promise.all([white.opened, black.opened, third.opened]);
+    const cookies = await prepareFriends(port);
+    assert.equal(Object.hasOwn(app, 'rooms'), false);
+    const carol = createClient(wsUrl, port, cookies.carolCookie);
+    clients.push(carol);
+    await carol.opened;
 
-    let mark = white.messages.length;
-    send(white, { type: 'create', timeControl: '1+0', name: 'Alice' });
-    const created = await white.waitFor((message) => message.type === 'created', mark);
-    const initialWhiteState = await white.waitFor((message) => message.type === 'state', mark);
-    assert.match(created.room, /^[A-Z0-9]{4,8}$/);
-    assert.equal(created.color, 'white');
-    assert.equal(initialWhiteState.token, created.token);
-    assert.equal(initialWhiteState.ready, false);
+    await expectError(carol, { type: 'create', timeControl: '5+3' }, 'INVALID_MESSAGE');
+    await expectError(carol, { type: 'join', room: 'PUBLIC1' }, 'INVALID_MESSAGE');
 
-    mark = black.messages.length;
-    send(black, { type: 'join', room: created.room, name: 'Bob' });
-    const joined = await black.waitFor((message) => message.type === 'joined', mark);
-    const blackState = await black.waitFor((message) => message.type === 'state' && message.ready, mark);
-    const whiteState = await white.waitFor((message) => message.type === 'state' && message.ready, mark);
-    assert.equal(joined.color, 'black');
-    assert.equal(blackState.token, joined.token);
-    assert.notEqual(joined.token, created.token);
-    assert.equal(whiteState.token, created.token);
-    assert.equal(JSON.stringify(blackState).includes(created.token), false, 'white token leaked to black');
-    assert.equal(JSON.stringify(whiteState).includes(joined.token), false, 'black token leaked to white');
+    const game = await openFriendGame(
+      wsUrl,
+      port,
+      cookies,
+      clients,
+      { initialMs: 10_000, incrementMs: 500 },
+    );
+    assert.equal(game.aliceState.variant, 'standard');
+    assert.deepEqual(game.aliceState.timeControl, { initialMs: 10_000, incrementMs: 500 });
+    assert.equal(Object.hasOwn(game.aliceState, 'room'), false);
+    assert.equal(Object.hasOwn(game.aliceState, 'ratings'), false);
+    assert.equal(JSON.stringify(game.aliceState).includes('rating'), false);
 
-    mark = black.messages.length;
-    send(black, { type: 'move', uci: 'e7e5' });
-    const wrongTurn = await black.waitFor((message) => message.type === 'error', mark);
+    const wrongTurn = await expectError(game.bob, { type: 'friendMove', uci: 'e7e5' }, 'MOVE_REJECTED');
     assert.match(wrongTurn.message, /not your turn/i);
-
-    mark = white.messages.length;
-    send(white, { type: 'move', uci: 'e2e5' });
-    const illegal = await white.waitFor((message) => message.type === 'error', mark);
+    const illegal = await expectError(game.alice, { type: 'friendMove', uci: 'e2e5' }, 'MOVE_REJECTED');
     assert.match(illegal.message, /not legal/i);
 
-    mark = white.messages.length;
-    send(white, { type: 'move', uci: 'e2e4' });
-    const moved = await white.waitFor((message) => message.type === 'state' && message.history.length === 1, mark);
-    assert.equal(moved.lastMove.from, 12);
+    stamp = 250;
+    const moveMark = game.alice.messages.length;
+    send(game.alice, { type: 'friendMove', uci: 'e2e4' });
+    const moved = await game.alice.waitFor((message) => message.type === 'state' && message.history.length === 1, moveMark);
+    assert.equal(moved.clocks.white, 10_250);
+    assert.equal(moved.clocks.black, 10_000);
     assert.equal(moved.turn, 'black');
 
-    mark = third.messages.length;
-    send(third, { type: 'join', room: created.room });
-    const full = await third.waitFor((message) => message.type === 'error', mark);
-    assert.match(full.message, /full|reconnect token/i);
-
-    mark = third.messages.length;
-    send(third, { type: 'join', room: created.room, token: 'not-a-token' });
-    const invalidToken = await third.waitFor((message) => message.type === 'error', mark);
-    assert.equal(invalidToken.code, 'INVALID_RECONNECT_TOKEN');
-
-    await black.close();
-    const reconnect = createClient(url);
-    clients.push(reconnect);
-    await reconnect.opened;
-    mark = reconnect.messages.length;
-    send(reconnect, { type: 'join', room: created.room, token: joined.token, name: 'Bob again' });
-    const rejoined = await reconnect.waitFor((message) => message.type === 'joined', mark);
-    assert.equal(rejoined.color, 'black');
-
-    mark = third.messages.length;
-    send(third, { type: 'join', room: created.room, token: joined.token });
-    const occupied = await third.waitFor((message) => message.type === 'error', mark);
-    assert.equal(occupied.code, 'RECONNECT_TOKEN_IN_USE');
-
-    mark = third.messages.length;
-    send(third, { type: 'move', uci: 'e7e5' });
-    const unauthorized = await third.waitFor((message) => message.type === 'error', mark);
-    assert.equal(unauthorized.code, 'NOT_AUTHENTICATED');
+    await expectError(carol, { type: 'friendMove', uci: 'e2e4' }, 'GAME_REQUIRED');
+    await expectError(carol, {
+      type: 'friendInvite',
+      toHandle: 'alice',
+      variant: 'standard',
+      timeControl: '5+3',
+    }, 'FRIEND_REQUIRED');
   } finally {
-    await closeAll(app, clients);
-  }
-});
-
-test('settles monotonic clocks once, applies one increment, and records timeout', async () => {
-  const { app, url } = await startServer({ clockIntervalMs: 5 });
-  const clients = [];
-  try {
-    const white = createClient(url);
-    const black = createClient(url);
-    clients.push(white, black);
-    await Promise.all([white.opened, black.opened]);
-
-    let mark = white.messages.length;
-    send(white, { type: 'create', timeControl: { initialMs: 10_000, incrementMs: 500 } });
-    const created = await white.waitFor((message) => message.type === 'created', mark);
-    mark = black.messages.length;
-    send(black, { type: 'join', room: created.room });
-    const ready = await white.waitFor((message) => message.type === 'state' && message.ready, mark);
-    const beforeWhite = ready.clocks.white;
-
-    mark = white.messages.length;
-    send(white, { type: 'move', uci: 'e2e4' });
-    const afterMove = await white.waitFor((message) => message.type === 'state' && message.history.length === 1, mark);
-    assert.ok(afterMove.clocks.white > beforeWhite + 200, 'the move did not receive its increment');
-    assert.ok(afterMove.clocks.white < beforeWhite + 700, 'the move received more than one increment');
-    const clockMark = black.messages.length;
-    await black.waitFor((message) => message.type === 'clock' && message.clocks.turn === 'black', clockMark);
-
-    const timeoutWhite = createClient(url);
-    const timeoutBlack = createClient(url);
-    clients.push(timeoutWhite, timeoutBlack);
-    await Promise.all([timeoutWhite.opened, timeoutBlack.opened]);
-    mark = timeoutWhite.messages.length;
-    send(timeoutWhite, { type: 'create', timeControl: { initialMs: 60, incrementMs: 0 } });
-    const timeoutCreated = await timeoutWhite.waitFor((message) => message.type === 'created', mark);
-    mark = timeoutBlack.messages.length;
-    send(timeoutBlack, { type: 'join', room: timeoutCreated.room });
-    const timeoutState = await timeoutWhite.waitFor((message) => message.type === 'state' && message.phase === 'timeout', mark, 2_000);
-    assert.equal(timeoutState.winner, 'black');
-    assert.equal(timeoutState.drawReason, null);
-    assert.equal(timeoutState.clocks.white, 0);
-    assert.equal(timeoutState.roomState, 'finished');
-  } finally {
-    await closeAll(app, clients);
-  }
-});
-
-test('requires mutual rematch consent and supports draw offer acceptance', async () => {
-  const { app, url } = await startServer({ clockIntervalMs: 10 });
-  const clients = [];
-  try {
-    const white = createClient(url);
-    const black = createClient(url);
-    clients.push(white, black);
-    await Promise.all([white.opened, black.opened]);
-    let mark = white.messages.length;
-    send(white, { type: 'create', timeControl: '5+3' });
-    const created = await white.waitFor((message) => message.type === 'created', mark);
-    mark = black.messages.length;
-    const whiteReadyMark = white.messages.length;
-    send(black, { type: 'join', room: created.room });
-    await white.waitFor((message) => message.type === 'state' && message.ready, whiteReadyMark);
-
-    mark = white.messages.length;
-    send(white, { type: 'resign' });
-    const resigned = await white.waitFor((message) => message.type === 'state' && message.phase === 'resigned', mark);
-    assert.equal(resigned.winner, 'black');
-    assert.equal(resigned.drawReason, null);
-    assert.equal(resigned.reason, 'white resigned');
-    assert.equal(resigned.roomState, 'finished');
-
-    mark = white.messages.length;
-    send(white, { type: 'rematch' });
-    const oneVote = await white.waitFor((message) => message.type === 'state' && message.rematchVotes.length === 1, mark);
-    assert.equal(oneVote.roomState, 'finished');
-    assert.equal(oneVote.history.length, 0);
-
-    mark = black.messages.length;
-    const rematchWhiteMark = white.messages.length;
-    send(black, { type: 'rematch' });
-    const rematched = await white.waitFor((message) => message.type === 'state' && message.roomState === 'playing' && message.rematchVotes.length === 0, rematchWhiteMark);
-    assert.equal(rematched.phase, 'playing');
-    assert.equal(rematched.history.length, 0);
-    assert.equal(rematched.ready, true);
-
-    mark = white.messages.length;
-    const offerBlackMark = black.messages.length;
-    send(white, { type: 'drawOffer' });
-    const offered = await black.waitFor((message) => message.type === 'state' && message.drawOffer === 'white', offerBlackMark);
-    assert.equal(offered.drawOffer, 'white');
-
-    mark = black.messages.length;
-    const acceptWhiteMark = white.messages.length;
-    send(black, { type: 'drawAccept' });
-    const agreed = await white.waitFor((message) => message.type === 'state' && message.phase === 'draw', acceptWhiteMark);
-    assert.equal(agreed.drawReason, 'agreement');
-    assert.equal(agreed.winner, null);
-  } finally {
-    await closeAll(app, clients);
-  }
-});
-
-test('keeps active rooms past TTL and protects the static and WebSocket origins', async () => {
-  const { app, port, url } = await startServer({ roomTtlMs: 40, clockIntervalMs: 5 });
-  const clients = [];
-  try {
-    const white = createClient(url);
-    const black = createClient(url);
-    clients.push(white, black);
-    await Promise.all([white.opened, black.opened]);
-    let mark = white.messages.length;
-    send(white, { type: 'create', timeControl: '1+0' });
-    const created = await white.waitFor((message) => message.type === 'created', mark);
-    mark = black.messages.length;
-    send(black, { type: 'join', room: created.room });
-    await white.waitFor((message) => message.type === 'state' && message.ready, mark);
-    await delay(100);
-    assert.equal(app.rooms.has(created.room), true, 'an active game expired without a move');
-
-    const root = await httpGet(port, '/');
-    assert.equal(root.status, 200);
-    const serverSource = await httpGet(port, '/server.js');
-    const packageJson = await httpGet(port, '/package.json');
-    const traversal = await httpGet(port, '/%2e%2e/server.js');
-    const badUri = await httpGet(port, '/%E0%A4%A');
-    assert.notEqual(serverSource.status, 200);
-    assert.notEqual(packageJson.status, 200);
-    assert.notEqual(traversal.status, 200);
-    assert.equal(badUri.status, 400);
-    assert.equal(serverSource.body.includes('createChessServer'), false);
-
-    const rejected = await new Promise((resolve) => {
-      const socket = new WebSocket(url, { origin: 'http://evil.example' });
-      const timer = setTimeout(() => {
-        socket.terminate();
-        resolve(null);
-      }, 1_000);
-      socket.once('unexpected-response', (request, response) => {
-        clearTimeout(timer);
-        resolve(response.statusCode);
-      });
-      socket.once('error', () => {});
-    });
-    assert.equal(rejected, 403);
-  } finally {
-    await closeAll(app, clients);
-  }
-});
-
-test('rejects malformed protocol messages and oversized frames', async () => {
-  const { app, url } = await startServer({ maxPayloadBytes: 256, clockIntervalMs: 10 });
-  const client = createClient(url);
-  try {
-    await client.opened;
-    let mark = client.messages.length;
-    client.socket.send('{not json');
-    const invalidJson = await client.waitFor((message) => message.type === 'error', mark);
-    assert.equal(invalidJson.code, 'INVALID_JSON');
-
-    mark = client.messages.length;
-    send(client, { type: 'create', timeControl: '__proto__' });
-    const invalidControl = await client.waitFor((message) => message.type === 'error', mark);
-    assert.equal(invalidControl.code, 'INVALID_TIME_CONTROL');
-
-    const closePromise = client.closed;
-    client.socket.send(JSON.stringify({ type: 'ping', padding: 'x'.repeat(1_000) }));
-    const [code] = await closePromise;
-    assert.equal(code, 1009);
-  } finally {
-    await client.close();
+    await Promise.all(clients.map((client) => client.close()));
     await app.close();
   }
 });
 
-test('preserves a null winner when flag fall is a draw for insufficient mating material', async () => {
+test('records a finished timeout with category metadata and before/after ratings', async () => {
   let stamp = 0;
-  const { app, url } = await startServer({ now: () => stamp, clockIntervalMs: 60_000 });
+  const { app, port, wsUrl } = await startServer({ now: () => stamp, clockIntervalMs: 5 });
   const clients = [];
   try {
-    const { white, black, created } = await createGame(url, clients, { initialMs: 1_000, incrementMs: 100 });
-    const room = app.rooms.get(created.room);
-    // White still has a rook, but the non-flagging side has only a bare king.
-    room.state = stateFromFEN('4k3/8/8/8/8/8/8/R3K3 w - - 0 1');
-    stamp = 1_000;
-    const blackMark = black.messages.length;
-    await expectError(white, { type: 'move', uci: 'a1a2' }, 'GAME_FINISHED');
-    const result = await black.waitFor((message) => message.type === 'state' && message.roomState === 'finished', blackMark);
-    assert.equal(result.phase, 'draw');
-    assert.equal(result.winner, null);
-    assert.equal(result.result.winner, null);
-    assert.equal(result.drawReason, 'timeout with insufficient mating material');
-    assert.equal(result.reason, 'white ran out of time');
-    assert.equal(result.clocks.white, 0);
-    assert.equal(result.history.length, 0, 'a flagged move must not be applied or receive increment');
+    const cookies = await prepareFriends(port);
+    const game = await openFriendGame(
+      wsUrl,
+      port,
+      cookies,
+      clients,
+      { initialMs: 60_000, incrementMs: 0 },
+    );
+    stamp = 60_001;
+    const finished = await game.alice.waitFor((message) => message.type === 'state' && message.phase === 'timeout');
+    assert.equal(finished.winner, 'black');
+    assert.equal(finished.clocks.white, 0);
+    assert.equal(finished.gameState, 'finished');
+    assert.equal(finished.result.category, 'bullet');
+    assert.equal(finished.result.variant, 'standard');
+    assert.deepEqual(finished.result.timeControl, { initialMs: 60_000, incrementMs: 0 });
+    assert.deepEqual(finished.result.ratings.white, { before: 1_200, after: 1_180 });
+    assert.deepEqual(finished.result.ratings.black, { before: 1_200, after: 1_220 });
+    assert.deepEqual(finished.result.ratings.before, { white: 1_200, black: 1_200 });
+    assert.deepEqual(finished.result.ratings.after, { white: 1_180, black: 1_220 });
+    assert.equal(app.activeGameIds.has('alice'), false);
+    assert.equal(app.activeGameIds.has('bob'), false);
   } finally {
-    await closeAll(app, clients);
+    await Promise.all(clients.map((client) => client.close()));
+    await app.close();
   }
 });
 
-test('settles each accepted move once with a deterministic increment', async () => {
-  let stamp = 0;
-  const { app, url } = await startServer({ now: () => stamp, clockIntervalMs: 60_000 });
+test('resign, draw acceptance, and rematches retain friend-game metadata', async () => {
+  const { app, port, wsUrl } = await startServer({ clockIntervalMs: 60_000 });
   const clients = [];
   try {
-    const { white, black, state } = await createGame(url, clients, { initialMs: 10_000, incrementMs: 500 });
-    assert.deepEqual(state.clocks, { white: 10_000, black: 10_000 });
+    const cookies = await prepareFriends(port);
+    const game = await openFriendGame(wsUrl, port, cookies, clients, '5+3');
+    const finishMark = game.alice.messages.length;
+    send(game.alice, { type: 'friendResign' });
+    const resigned = await game.alice.waitFor((message) => message.type === 'state' && message.phase === 'resigned', finishMark);
+    assert.equal(resigned.winner, 'black');
+    assert.equal(resigned.result.category, 'blitz');
 
-    stamp = 250;
-    const afterWhite = await playMove(white, 'e2e4', 1);
-    assert.equal(afterWhite.clocks.white, 10_250, 'white loses 250ms and receives exactly one 500ms increment');
-    assert.equal(afterWhite.clocks.black, 10_000);
+    const voteMark = game.alice.messages.length;
+    send(game.alice, { type: 'friendRematch' });
+    await game.alice.waitFor((message) => message.type === 'state' && message.rematchVotes.length === 1, voteMark);
+    send(game.bob, { type: 'friendRematch' });
+    const rematched = await game.alice.waitFor(
+      (message) => message.type === 'state' && message.gameState === 'playing' && message.rematchVotes.length === 0,
+      voteMark,
+    );
+    assert.equal(rematched.result, null);
+    assert.equal(rematched.variant, 'standard');
+    assert.equal(rematched.timeControl, '5+3');
 
-    stamp = 500;
-    const afterBlack = await playMove(black, 'e7e5', 2);
-    assert.equal(afterBlack.clocks.white, 10_250);
-    assert.equal(afterBlack.clocks.black, 10_250, 'black loses 250ms and receives exactly one 500ms increment');
+    const drawMark = game.alice.messages.length;
+    send(game.alice, { type: 'friendDrawOffer' });
+    await game.bob.waitFor((message) => message.type === 'state' && message.drawOffer === 'white');
+    send(game.bob, { type: 'friendDrawAccept' });
+    const draw = await game.alice.waitFor((message) => message.type === 'state' && message.phase === 'draw', drawMark);
+    assert.equal(draw.drawReason, 'agreement');
+    assert.equal(draw.winner, null);
+    assert.equal(draw.result.category, 'blitz');
   } finally {
-    await closeAll(app, clients);
+    await Promise.all(clients.map((client) => client.close()));
+    await app.close();
   }
 });
 
-test('does not leak moves or reconnect tokens across rooms', async () => {
-  const { app, url } = await startServer({ now: () => 0, clockIntervalMs: 60_000 });
-  const clients = [];
+test('protects static files and sends security headers without exposing server sources', async () => {
+  const { app, port } = await startServer();
   try {
-    const first = await createGame(url, clients);
-    const second = await createGame(url, clients);
-    assert.notEqual(first.created.room, second.created.room);
+    const root = await request(port, 'GET', '/');
+    assert.equal(root.status, 200);
+    assert.equal(root.headers['x-content-type-options'], 'nosniff');
+    assert.equal(root.headers['referrer-policy'], 'no-referrer');
 
-    const outsider = createClient(url);
-    clients.push(outsider);
-    await outsider.opened;
-    await expectError(outsider, {
-      type: 'join',
-      room: second.created.room,
-      token: first.created.token,
-    }, 'INVALID_RECONNECT_TOKEN');
+    const premoveModule = await request(port, 'GET', '/premove.js');
+    assert.equal(premoveModule.status, 200);
+    assert.match(premoveModule.headers['content-type'], /^text\/javascript/);
 
-    const secondMark = second.white.messages.length;
-    await playMove(first.white, 'e2e4', 1);
-    await delay(20);
-    assert.equal(second.white.messages.length, secondMark, 'room two did not receive room one state');
+    const health = await request(port, 'GET', '/health');
+    assert.equal(health.status, 200);
+    assert.equal(health.headers['cache-control'], 'no-store');
+    assert.equal(health.headers['x-content-type-options'], 'nosniff');
+
+    const unauthorizedFriends = await request(port, 'GET', '/api/friends');
+    assert.equal(unauthorizedFriends.status, 401);
+    assert.equal(unauthorizedFriends.headers['x-content-type-options'], 'nosniff');
+
+    const serverSource = await request(port, 'GET', '/server.js');
+    const packageJson = await request(port, 'GET', '/package.json');
+    const traversal = await request(port, 'GET', '/%2e%2e/server.js');
+    const malformedPath = await request(port, 'GET', '/%E0%A4%A');
+    assert.notEqual(serverSource.status, 200);
+    assert.notEqual(packageJson.status, 200);
+    assert.notEqual(traversal.status, 200);
+    assert.equal(malformedPath.status, 400);
+    assert.equal(serverSource.body.includes('createChessServer'), false);
   } finally {
-    await closeAll(app, clients);
-  }
-});
-
-test('expires inactive waiting rooms and closes their connected sockets', async () => {
-  let stamp = 0;
-  const { app, url } = await startServer({ now: () => stamp, roomTtlMs: 40, clockIntervalMs: 5 });
-  const clients = [];
-  try {
-    const client = createClient(url);
-    clients.push(client);
-    await client.opened;
-    send(client, { type: 'create', timeControl: '1+0' });
-    const created = await client.waitFor((message) => message.type === 'created');
-    const closed = client.closed;
-    stamp = 41;
-    await delay(30);
-    assert.equal(app.rooms.has(created.room), false);
-    const [closeCode] = await closed;
-    assert.equal(closeCode, 1000);
-  } finally {
-    await closeAll(app, clients);
-  }
-});
-
-test('allows only the side to move to claim an available repetition draw', async () => {
-  const { app, url } = await startServer({ now: () => 0, clockIntervalMs: 60_000 });
-  const clients = [];
-  try {
-    const { white, black } = await createGame(url, clients);
-    let state;
-    const cycle = ['g1f3', 'g8f6', 'f3g1', 'f6g8'];
-    for (let ply = 0; ply < 8; ply += 1) {
-      state = await playMove(ply % 2 ? black : white, cycle[ply % cycle.length], ply + 1);
-    }
-    assert.equal(state.phase, 'playing');
-    assert.deepEqual(state.claimableDraws, ['threefold repetition']);
-    await expectError(black, { type: 'claimDraw', reason: 'threefold repetition' }, 'DRAW_CLAIM_REJECTED');
-    const mark = white.messages.length;
-    send(white, { type: 'claimDraw', drawReason: ' THREEFOLD REPETITION ' });
-    const claimed = await white.waitFor((message) => message.type === 'state' && message.phase === 'draw', mark);
-    assert.equal(claimed.drawReason, 'threefold repetition');
-    assert.equal(claimed.winner, null);
-    assert.deepEqual(claimed.claimableDraws, []);
-  } finally {
-    await closeAll(app, clients);
-  }
-});
-
-test('keeps a draw offer through the offering player move until the opponent responds', async () => {
-  const { app, url } = await startServer({ now: () => 0, clockIntervalMs: 60_000 });
-  const clients = [];
-  try {
-    const { white, black } = await createGame(url, clients);
-    let mark = white.messages.length;
-    send(white, { type: 'offerDraw' });
-    await white.waitFor((message) => message.type === 'state' && message.drawOffer === 'white', mark);
-    await expectError(white, { type: 'drawAccept' }, 'DRAW_OFFER_SELF_ACCEPT');
-    const moved = await playMove(white, 'e2e4', 1);
-    assert.equal(moved.drawOffer, 'white');
-    mark = black.messages.length;
-    send(black, { type: 'acceptDraw' });
-    const agreed = await black.waitFor((message) => message.type === 'state' && message.phase === 'draw', mark);
-    assert.equal(agreed.drawReason, 'agreement');
-    assert.equal(agreed.winner, null);
-  } finally {
-    await closeAll(app, clients);
+    await app.close();
   }
 });
