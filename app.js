@@ -31,6 +31,15 @@ import {
   uciToMove,
 } from './chess.js';
 import { previewPremoveState, resolvePremove } from './premove.js';
+import { isStaticDemoMode } from './static-mode.js';
+
+const STATIC_DEMO_MODE = isStaticDemoMode();
+const STATIC_DEMO_ACCOUNT = Object.freeze({
+  handle: 'demo_guest',
+  displayName: 'Demo Guest',
+  acceptedFairPlayTerms: true,
+  acceptedPrivacyPolicy: true,
+});
 
 const boardElement = document.querySelector('#board');
 const boardFrameElement = document.querySelector('.board-frame');
@@ -112,6 +121,7 @@ const lobbyColorChoice = document.querySelector('#color-choice');
 const lobbyTimeControl = document.querySelector('#lobby-time-control');
 const lobbyDifficultySelect = document.querySelector('#lobby-difficulty');
 const lobbyAdaptiveLevelElement = document.querySelector('#lobby-adaptive-level');
+const staticDemoNoticeElement = document.querySelector('#static-demo-notice');
 const welcomeChoiceButtons = [...document.querySelectorAll('[data-welcome-choice]')];
 const lobbyStartButton = document.querySelector('#lobby-start');
 const friendsPanel = document.querySelector('#friends-panel');
@@ -756,8 +766,43 @@ function showToast(message) {
   toastTimer = window.setTimeout(() => toastElement.classList.remove('show'), 2800);
 }
 
+function setStaticDemoNotice(message = 'DEMO MODE · DEMO GUEST · LOCAL AI AND LOCAL TWO-PLAYER ONLY · ONLINE MODES NEED A SERVER') {
+  if (!STATIC_DEMO_MODE || !staticDemoNoticeElement) return;
+  staticDemoNoticeElement.hidden = false;
+  setText(staticDemoNoticeElement, message);
+}
+
+function markStaticNetworkOptions(selectElement) {
+  if (!STATIC_DEMO_MODE || !selectElement) return;
+  for (const option of selectElement.options || []) {
+    if (!NETWORK_MODES.has(option.value)) continue;
+    option.disabled = true;
+    if (option.dataset.staticLabelApplied !== 'true') {
+      option.dataset.staticLabelApplied = 'true';
+      option.textContent = `${option.textContent} · server only`;
+    }
+  }
+}
+
+function applyStaticDemoUi() {
+  if (!STATIC_DEMO_MODE) return;
+  setStaticDemoNotice();
+  markStaticNetworkOptions(gameChoice);
+  markStaticNetworkOptions(modeSelect);
+  if (friendsPanel) friendsPanel.hidden = true;
+  if (friendActionsElement) friendActionsElement.hidden = true;
+}
+
+function rejectStaticNetworkMode() {
+  if (!STATIC_DEMO_MODE) return false;
+  setStaticDemoNotice('DEMO MODE · ONLINE FRIEND AND RANDOM MODES ARE UNAVAILABLE · NO SERVER CONNECTED');
+  setText(onlineRoomStatus, 'ONLINE MODES ARE UNAVAILABLE IN DEMO MODE · NO SERVER CONNECTED');
+  showToast('Friend and random online modes are unavailable in demo mode.');
+  return true;
+}
+
 function setAccountStatus(message) {
-  setText(accountStatusElement, message, 'ACCOUNT SESSION');
+  setText(accountStatusElement, message, STATIC_DEMO_MODE ? 'DEMO GUEST · LOCAL ONLY' : 'ACCOUNT SESSION');
 }
 
 function setAuthModalVisible(visible, { focus = false, screen = 'auth' } = {}) {
@@ -983,8 +1028,23 @@ function setAuthenticatedAccount(nextAccount) {
   if (termsCheckbox) termsCheckbox.checked = fairPlayAccepted;
   if (privacyCheckbox) privacyCheckbox.checked = Boolean(account?.acceptedPrivacyPolicy);
   if (termsScreen) termsScreen.open = authenticated ? !fairPlayAccepted : true;
-  setAccountStatus(authenticated ? `SIGNED IN · ${account.handle}` : 'SIGN IN REQUIRED');
-  if (signoutButton) signoutButton.hidden = !authenticated;
+  setAccountStatus(authenticated
+    ? STATIC_DEMO_MODE ? 'DEMO GUEST · LOCAL ONLY' : `SIGNED IN · ${account.handle}`
+    : 'SIGN IN REQUIRED');
+  if (signoutButton) signoutButton.hidden = STATIC_DEMO_MODE || !authenticated;
+}
+
+function activateStaticDemo() {
+  if (!STATIC_DEMO_MODE) return;
+  disconnectSocket(true);
+  if (gameChoice && NETWORK_MODES.has(gameChoice.value)) gameChoice.value = 'ai';
+  if (modeSelect && NETWORK_MODES.has(modeSelect.value)) modeSelect.value = 'ai';
+  friends = { friends: [], incomingRequests: [], outgoingRequests: [] };
+  selectedFriendHandle = null;
+  setAuthenticatedAccount(STATIC_DEMO_ACCOUNT);
+  applyStaticDemoUi();
+  showAuthenticatedLobby();
+  setText(matchClockElement, 'LOCAL DEMO');
 }
 
 function disconnectSocket(clearGame = false) {
@@ -1021,6 +1081,10 @@ function disconnectSocket(clearGame = false) {
 }
 
 function showAuthScreen(message = '') {
+  if (STATIC_DEMO_MODE) {
+    activateStaticDemo();
+    return;
+  }
   setAuthenticatedAccount(null);
   disconnectSocket(true);
   showLobbyScreen();
@@ -1039,6 +1103,10 @@ function showAuthScreen(message = '') {
 }
 
 function showWelcomeScreen(message = '') {
+  if (STATIC_DEMO_MODE) {
+    activateStaticDemo();
+    return;
+  }
   setAuthenticatedAccount(null);
   disconnectSocket(true);
   showLobbyScreen();
@@ -1064,11 +1132,12 @@ function showAuthenticatedLobby() {
   showLobbyScreen();
   setAuthModalVisible(false);
   if (lobbyForm) lobbyForm.hidden = false;
-  if (friendsPanel) friendsPanel.hidden = false;
-  if (friendActionsElement) friendActionsElement.hidden = false;
+  if (friendsPanel) friendsPanel.hidden = STATIC_DEMO_MODE;
+  if (friendActionsElement) friendActionsElement.hidden = STATIC_DEMO_MODE;
   setAuthStatus('');
   setWelcomeStatus('');
   if (termsScreen && fairPlayAccepted) termsScreen.open = false;
+  applyStaticDemoUi();
   updateLobbySummary();
   renderFriends();
   render();
@@ -1178,6 +1247,8 @@ function restoreSnapshot(snapshot) {
 }
 
 function setModeControls() {
+  if (STATIC_DEMO_MODE && NETWORK_MODES.has(mode)) mode = 'ai';
+  applyStaticDemoUi();
   if (modeSelect && MODE_VALUES.has(mode)) modeSelect.value = mode;
   if (timeControlSelect && !isNetworkMode() && Object.hasOwn(TIME_CONTROLS, selectedTimeControl)) {
     timeControlSelect.value = selectedTimeControl;
@@ -2168,6 +2239,10 @@ function openPromotion(moves, { premove = false } = {}) {
 }
 
 function sendOnlineAction(action, { queue = false } = {}) {
+  if (STATIC_DEMO_MODE) {
+    rejectStaticNetworkMode();
+    return false;
+  }
   if (!action || (!ONLINE_ACTION_TYPES.has(action.type) && !QUICK_ACTION_TYPES.has(action.type))) return false;
   if (socket && socket.readyState === WebSocket.OPEN) {
     try {
@@ -2187,6 +2262,7 @@ function sendOnlineAction(action, { queue = false } = {}) {
 }
 
 function connectOnline() {
+  if (STATIC_DEMO_MODE) return false;
   if (!authenticated || typeof WebSocket === 'undefined') return false;
   if (!window.location.host) {
     setText(onlineRoomStatus, 'Serve Nova Chess over HTTP to connect online games.');
@@ -2381,6 +2457,9 @@ function selectFriendIfAvailable(handle) {
 }
 
 async function requestJson(url, options = {}) {
+  if (STATIC_DEMO_MODE) {
+    throw new ApiError('Online account and friend features are unavailable in demo mode.');
+  }
   const headers = { Accept: 'application/json', ...(options.headers || {}) };
   const requestOptions = {
     ...options,
@@ -2410,7 +2489,7 @@ async function requestJson(url, options = {}) {
 }
 
 async function loadFriends() {
-  if (!authenticated) return;
+  if (STATIC_DEMO_MODE || !authenticated) return;
   try {
     const payload = await requestJson('/api/friends', { method: 'GET' });
     friends = normalizeFriendLists(payload);
@@ -2429,6 +2508,10 @@ async function loadFriends() {
 }
 
 async function sendFriendRequest() {
+  if (STATIC_DEMO_MODE) {
+    rejectStaticNetworkMode();
+    return;
+  }
   if (!authenticated) return;
   const handle = sanitizeHandle(friendHandleInput?.value);
   if (!handle) {
@@ -2452,6 +2535,10 @@ async function sendFriendRequest() {
 }
 
 async function respondToFriendRequest(requestId, accept) {
+  if (STATIC_DEMO_MODE) {
+    rejectStaticNetworkMode();
+    return;
+  }
   const safeRequestId = validOpaqueId(requestId);
   if (!safeRequestId) return;
   try {
@@ -2467,6 +2554,10 @@ async function respondToFriendRequest(requestId, accept) {
 }
 
 function sendFriendInviteFor(handle, variant, timeControl, colorChoice) {
+  if (STATIC_DEMO_MODE) {
+    rejectStaticNetworkMode();
+    return false;
+  }
   if (!hasFairPlayConsent()) {
     if (termsScreen) termsScreen.open = true;
     setFriendStatus('Accept fair-play terms before starting a rated friend game.');
@@ -2501,6 +2592,10 @@ function sendFriendInviteFor(handle, variant, timeControl, colorChoice) {
 }
 
 function respondToFriendInvite(invite, accept) {
+  if (STATIC_DEMO_MODE) {
+    rejectStaticNetworkMode();
+    return;
+  }
   if (!invite || !validOpaqueId(invite.inviteId)) return;
   if (accept && !hasFairPlayConsent()) {
     if (termsScreen) termsScreen.open = true;
@@ -2530,6 +2625,10 @@ function respondToFriendInvite(invite, accept) {
 }
 
 function startQuickMatch(variant, timeControl, colorChoice) {
+  if (STATIC_DEMO_MODE) {
+    rejectStaticNetworkMode();
+    return false;
+  }
   if (!hasFairPlayConsent()) {
     if (termsScreen) termsScreen.open = true;
     setFriendStatus('Accept fair-play terms before starting a rated quick match.');
@@ -2587,10 +2686,20 @@ function startQuickMatch(variant, timeControl, colorChoice) {
 function startSelectedGame(event) {
   event?.preventDefault();
   if (!authenticated) {
+    if (STATIC_DEMO_MODE) {
+      activateStaticDemo();
+      return;
+    }
     showAuthScreen('Sign in or create an account before starting a game.');
     return;
   }
   const selectedMode = MODE_VALUES.has(gameChoice?.value) ? gameChoice.value : 'ai';
+  if (STATIC_DEMO_MODE && NETWORK_MODES.has(selectedMode)) {
+    if (gameChoice) gameChoice.value = 'ai';
+    updateLobbySummary();
+    rejectStaticNetworkMode();
+    return;
+  }
   const selectedVariant = normalizeVariant(variantChoice?.value) || 'standard';
   const selectedTime = Object.hasOwn(TIME_CONTROLS, lobbyTimeControl?.value) ? lobbyTimeControl.value : '5+3';
   const selectedDifficulty = normalizeDifficulty(lobbyDifficultySelect?.value);
@@ -3109,6 +3218,7 @@ function resignLocalGame(resigningColor) {
 }
 
 function cancelPendingQuickMatch() {
+  if (STATIC_DEMO_MODE) return false;
   if (mode !== 'quick' || onlineGameId || !quickMatchRequest) return false;
   sendOnlineAction({ type: 'cancelQuickMatch', ...(quickMatchId ? { matchId: quickMatchId } : {}) });
   quickMatchRequest = null;
@@ -3143,6 +3253,10 @@ function undoMove() {
 
 async function submitAuth(event) {
   event.preventDefault();
+  if (STATIC_DEMO_MODE) {
+    activateStaticDemo();
+    return;
+  }
   const authMode = authModeSelect?.value === 'login' ? 'login' : 'signup';
   const handle = sanitizeHandle(profileHandleInput?.value);
   const displayName = sanitizeDisplayName(profileNameInput?.value);
@@ -3202,6 +3316,10 @@ async function submitAuth(event) {
 }
 
 async function loadCurrentAccount() {
+  if (STATIC_DEMO_MODE) {
+    activateStaticDemo();
+    return;
+  }
   try {
     const payload = await requestJson('/api/me', { method: 'GET' });
     const nextAccount = normalizeAccount(payload.account || payload.user);
@@ -3220,6 +3338,10 @@ async function loadCurrentAccount() {
 }
 
 async function signOut() {
+  if (STATIC_DEMO_MODE) {
+    setStaticDemoNotice();
+    return;
+  }
   try {
     await requestJson('/api/auth/logout', { method: 'POST', body: '{}' });
   } catch (error) {
@@ -3279,6 +3401,12 @@ privacyPageBackButton?.addEventListener('click', () => {
 
 lobbyForm?.addEventListener('submit', startSelectedGame);
 gameChoice?.addEventListener('change', () => {
+  if (STATIC_DEMO_MODE && NETWORK_MODES.has(gameChoice.value)) {
+    gameChoice.value = 'ai';
+    updateLobbySummary();
+    rejectStaticNetworkMode();
+    return;
+  }
   if (gameChoice.value !== 'online') selectedFriendHandle = null;
   updateLobbySummary();
 });
@@ -3331,6 +3459,11 @@ difficultySelect?.addEventListener('change', () => {
 });
 modeSelect?.addEventListener('change', () => {
   if (!MODE_VALUES.has(modeSelect.value)) return;
+  if (STATIC_DEMO_MODE && NETWORK_MODES.has(modeSelect.value)) {
+    rejectStaticNetworkMode();
+    modeSelect.value = mode;
+    return;
+  }
   if (gameChoice) gameChoice.value = modeSelect.value;
   updateLobbySummary();
   if (authenticated) showAuthenticatedLobby();
@@ -3464,8 +3597,12 @@ if (gameScreen) {
   gameScreen.hidden = true;
   gameScreen.style.display = 'none';
 }
-setAccountStatus('RESTORING SESSION…');
-setText(matchClockElement, 'RESTORING SESSION…');
+if (STATIC_DEMO_MODE) {
+  activateStaticDemo();
+} else {
+  setAccountStatus('RESTORING SESSION…');
+  setText(matchClockElement, 'RESTORING SESSION…');
+}
 updateViewportLayout();
 window.setInterval(tickClocks, 100);
-void loadCurrentAccount();
+if (!STATIC_DEMO_MODE) void loadCurrentAccount();

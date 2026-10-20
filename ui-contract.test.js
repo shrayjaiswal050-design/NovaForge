@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { isStaticDemoMode } from './static-mode.js';
 
 const index = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const app = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
@@ -17,4 +18,16 @@ test('NovaForge strength must be chosen explicitly before an AI game starts', ()
   assert.match(index, /id=["']difficulty-select["']/);
   assert.match(app, /selectedMode === 'ai' && !selectedDifficulty/);
   assert.match(app, /Choose a NovaForge strength before opening the game board/);
+});
+
+test('static demo mode detects Pages hosts and the explicit query flag without opening network access', () => {
+  assert.equal(isStaticDemoMode({ hostname: 'nova-chess.github.io', search: '' }), true);
+  assert.equal(isStaticDemoMode({ hostname: 'NOVA-CHESS.GITHUB.IO', search: '' }), true);
+  assert.equal(isStaticDemoMode({ hostname: 'localhost', search: '?static=1' }), true);
+  assert.equal(isStaticDemoMode({ hostname: 'localhost', search: '?static=0' }), false);
+  assert.equal(isStaticDemoMode({ hostname: 'localhost', search: '' }), false);
+  assert.match(index, /id=["']static-demo-notice["']/);
+  assert.match(app, /if \(STATIC_DEMO_MODE\) \{\s*throw new ApiError/);
+  assert.match(app, /function connectOnline\(\) \{\s*if \(STATIC_DEMO_MODE\) return false;/);
+  assert.match(app, /if \(!STATIC_DEMO_MODE\) void loadCurrentAccount\(\);/);
 });
