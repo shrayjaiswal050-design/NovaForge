@@ -290,6 +290,10 @@ test('protects static files and sends security headers without exposing server s
     assert.equal(premoveModule.status, 200);
     assert.match(premoveModule.headers['content-type'], /^text\/javascript/);
 
+    const staticModeModule = await request(port, 'GET', '/static-mode.js');
+    assert.equal(staticModeModule.status, 200);
+    assert.match(staticModeModule.headers['content-type'], /^text\/javascript/);
+
     const health = await request(port, 'GET', '/health');
     assert.equal(health.status, 200);
     assert.equal(health.headers['cache-control'], 'no-store');

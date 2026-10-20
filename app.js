@@ -207,6 +207,7 @@ let viewedPly = null;
 let selectedSquare = -1;
 let pendingPromotion = null;
 let pendingPromotionType = 'live';
+let promotionReturnFocus = null;
 let premoveQueue = [];
 let premoveInFlight = null;
 let previousStates = [];
@@ -910,6 +911,10 @@ function closePromotion() {
   pendingPromotionType = 'live';
   if (promotionModal) promotionModal.hidden = true;
   promotionOptions?.replaceChildren();
+  if (promotionReturnFocus && typeof promotionReturnFocus.focus === 'function') {
+    promotionReturnFocus.focus();
+  }
+  promotionReturnFocus = null;
 }
 
 function setHash(hash) {
@@ -1260,6 +1265,7 @@ function setModeControls() {
       && (Boolean(onlineGameId) || (mode === 'quick' && Boolean(quickMatchRequest)))
       && !gameScreen?.hidden;
     onlineSettings.hidden = !showOnlinePanel;
+    onlineSettings.setAttribute('aria-hidden', String(!showOnlinePanel));
     onlineSettings.style.setProperty('display', showOnlinePanel ? 'block' : 'none', 'important');
     for (const child of onlineSettings.children) {
       if (child === onlineActions || child === onlineRoomStatus) continue;
@@ -2211,6 +2217,7 @@ function onPremoveSquareClick(square) {
 }
 
 function openPromotion(moves, { premove = false } = {}) {
+  promotionReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   pendingPromotion = moves;
   pendingPromotionType = premove ? 'premove' : 'live';
   promotionOptions?.replaceChildren();
@@ -2236,6 +2243,7 @@ function openPromotion(moves, { premove = false } = {}) {
     promotionOptions?.append(choice);
   }
   if (promotionModal) promotionModal.hidden = false;
+  promotionOptions?.querySelector('button')?.focus();
 }
 
 function sendOnlineAction(action, { queue = false } = {}) {
@@ -3016,7 +3024,13 @@ function cancelEngine() {
 
 function startEngine() {
   const status = currentStatus();
-  if (mode !== 'ai' || status.phase !== 'playing' || game.turn === humanColor || typeof Worker === 'undefined') return;
+  if (mode !== 'ai' || status.phase !== 'playing' || game.turn === humanColor) return;
+  if (typeof Worker === 'undefined') {
+    cancelEngine();
+    render();
+    showToast('NovaForge needs Web Worker support in this browser. Try a current browser or choose Local two-player.');
+    return;
+  }
   const difficulty = selectedEngineDifficulty();
   if (!difficulty) {
     cancelEngine();

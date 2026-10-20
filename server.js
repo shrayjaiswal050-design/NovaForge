@@ -73,6 +73,7 @@ const STATIC_FILES = new Set([
   'engine.js',
   'engine-worker.js',
   'premove.js',
+  'static-mode.js',
 ]);
 
 const MESSAGE_TYPES = new Set([
