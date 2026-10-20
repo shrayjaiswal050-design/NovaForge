@@ -6,6 +6,16 @@ node_modules/
 .env.*
 !.env.example
 
+# Private credentials and certificates
+.npmrc
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+
 # Logs
 logs/
 *.log
