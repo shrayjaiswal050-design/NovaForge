@@ -32,7 +32,7 @@ const PASSWORD_SCRYPT_OPTIONS = Object.freeze({
   p: 1,
   maxmem: 64 * 1024 * 1024,
 });
-const DUMMY_PASSWORD = 'invalid-login-password';
+const DUMMY_PASSWORD = process.env.AUTH_DUMMY_PASSWORD || randomBytes(32).toString('base64url');
 const DUMMY_SALT = Buffer.from('nova-chess-dummy-salt', 'utf8');
 const DUMMY_PASSWORD_HASH = scryptSync(DUMMY_PASSWORD, DUMMY_SALT, PASSWORD_KEY_LENGTH, PASSWORD_SCRYPT_OPTIONS);
 const CONTROL_OR_FORMAT_CHARACTERS = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]/gu;
