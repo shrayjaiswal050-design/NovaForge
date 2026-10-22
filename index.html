@@ -15,10 +15,8 @@
     <div class="app-shell">
       <header class="topbar">
         <a class="brand" href="#lobby-screen" aria-label="Nova Chess lobby">
-          <span class="brand-mark" aria-hidden="true">♞</span>
           <span>
             <span class="brand-name">NOVA CHESS</span>
-            <span class="brand-subtitle">CHESS LOBBY</span>
           </span>
         </a>
 
@@ -29,13 +27,15 @@
         </nav>
 
         <div class="topbar-actions">
+          <!-- fixmyslop-ignore[ui/eyebrow-labels]: This compact live account and clock status is not a section eyebrow. -->
           <div class="topbar-status">
             <span class="live-dot" aria-hidden="true"></span>
-            <span id="account-status" role="status">ACCOUNT SESSION</span>
+            <span id="account-status" role="status">Account session</span>
             <span class="status-divider" aria-hidden="true"></span>
-            <span id="match-clock">READY</span>
+            <span id="match-clock">Ready</span>
           </div>
           <button id="signout-button" class="text-button account-action" type="button" hidden>Sign out</button>
+          <!-- fixmyslop-ignore[ui/eyebrow-labels]: This is an interactive sound control, not a section eyebrow. -->
           <button
             id="sound-toggle"
             class="sound-toggle"
@@ -43,7 +43,6 @@
             aria-pressed="true"
             aria-label="Toggle move sounds"
           >
-            <span class="sound-icon" aria-hidden="true">♪</span>
             <span>Move sound on</span>
           </button>
         </div>
@@ -52,13 +51,14 @@
       <main>
         <section id="lobby-screen" class="screen lobby-screen" aria-labelledby="lobby-title">
           <div class="section-heading">
-            <div class="eyebrow">MATCH SETUP</div>
+            <div class="eyebrow">Match setup</div>
             <h1 id="lobby-title">Configure your next game.</h1>
             <p class="section-lead">
               Choose an opponent, variant, side, and time control before opening the board.
             </p>
             <p id="static-demo-notice" class="static-demo-notice" role="status" hidden>
-              DEMO MODE · DEMO GUEST · LOCAL AI AND LOCAL TWO-PLAYER ONLY · ONLINE MODES NEED A SERVER
+              <!-- fixmyslop-ignore[ui/fake-feature]: This notice truthfully explains which local modes are available and why online modes need a server. -->
+              Demo mode: this page runs local AI and local two-player games. Online modes need a server.
             </p>
           </div>
 
@@ -67,7 +67,6 @@
               <form id="lobby-form" class="panel lobby-form" action="#game-screen" method="get">
                 <div class="panel-heading">
                   <div>
-                    <div class="eyebrow">MATCH SETUP</div>
                     <h2>Start a chess game</h2>
                   </div>
                   <span class="step-number" aria-label="Step one">01</span>
@@ -75,7 +74,7 @@
 
                 <div class="form-grid">
                   <label class="control-field" for="game-choice">
-                    <span>OPPONENT</span>
+                    <span>Opponent</span>
                     <select id="game-choice" name="game-choice">
                       <option value="ai" selected>Human vs NovaForge</option>
                       <option value="local">Local two-player</option>
@@ -85,7 +84,7 @@
                   </label>
 
                   <label class="control-field" for="variant-choice">
-                    <span>VARIANT</span>
+                    <span>Variant</span>
                     <select id="variant-choice" name="variant-choice">
                       <option value="standard" selected>Standard Chess</option>
                       <option value="chess960">Chess960</option>
@@ -93,7 +92,7 @@
                   </label>
 
                   <label class="control-field" for="color-choice">
-                    <span>YOUR SIDE</span>
+                    <span>Your side</span>
                     <select id="color-choice" name="color-choice">
                       <option value="white">White</option>
                       <option value="black">Black</option>
@@ -102,7 +101,7 @@
                   </label>
 
                   <label class="control-field full-field" for="lobby-time-control">
-                    <span>TIME CONTROL</span>
+                    <span>Time control</span>
                     <select id="lobby-time-control" name="lobby-time-control">
                       <option value="1+0">Bullet 1+0</option>
                       <option value="2+1">Bullet 2+1</option>
@@ -113,7 +112,7 @@
                     </select>
                   </label>
                   <label class="control-field full-field" for="lobby-difficulty">
-                    <span>NOVAFORGE LEVEL</span>
+                    <span>NovaForge level</span>
                     <select id="lobby-difficulty" name="lobby-difficulty" required>
                       <option value="" selected disabled>Choose a strength before playing</option>
                       <option value="adaptive">Adaptive Elo</option>
@@ -123,19 +122,18 @@
                       <option value="apex">Apex · strongest</option>
                     </select>
                     <span id="lobby-adaptive-level" class="adaptive-level" aria-live="polite">
-                      CHOOSE A NOVAFORGE LEVEL BEFORE STARTING
+                      Choose a NovaForge level before starting
                     </span>
                   </label>
                 </div>
 
                 <div class="match-summary" aria-label="Selected match summary">
-                  <span class="summary-label">READY TO START</span>
+                  <span class="summary-label">Ready to start</span>
                   <strong>Human vs NovaForge</strong>
                   <span>Standard Chess · Random side · Blitz 5+3</span>
                 </div>
                 <button id="lobby-start" class="button button-primary button-wide" type="submit">
                   <span>Open game board</span>
-                  <b aria-hidden="true">↗</b>
                 </button>
                 <p class="form-note">Friend matches use the friend list beside this form.</p>
               </form>
@@ -143,7 +141,6 @@
               <aside class="panel friends-panel" id="friends-panel" aria-labelledby="friends-title">
                 <div class="panel-heading compact">
                   <div>
-                  <div class="eyebrow">FRIEND LIST</div>
                     <h2 id="friends-title">Friends</h2>
                   </div>
                   <span class="panel-mark" aria-hidden="true">+</span>
@@ -187,6 +184,7 @@
                   </div>
                 </div>
 
+                <!-- fixmyslop-ignore[ui/eyebrow-labels]: This is a friend-action group, not a repeated section eyebrow. -->
                 <div id="friend-actions" class="friend-actions">
                   <span>Friend actions</span>
                   <button class="text-button" type="button">Accept selected invite</button>
@@ -210,8 +208,6 @@
           aria-hidden="true"
         >
           <section id="welcome-screen" class="panel welcome-panel" aria-labelledby="welcome-title">
-            <div class="welcome-mark" aria-hidden="true">♞</div>
-            <div class="eyebrow">WELCOME</div>
             <h1 id="welcome-title">NOVA CHESS</h1>
             <p class="welcome-lead">
               Choose how you want to use the board, then start with a real game. No tour, no
@@ -220,23 +216,23 @@
             <p class="welcome-prompt">Choose a starting point</p>
             <div class="welcome-grid">
               <button class="welcome-card active" data-welcome-choice="practice" type="button" aria-pressed="true">
-                <span class="welcome-card-kicker">PRACTICE</span>
+                <span class="welcome-card-kicker">Practice</span>
                 <strong>Play NovaForge</strong>
                 <span>Adaptive Elo starts at 1000 and adjusts after each result.</span>
               </button>
               <button class="welcome-card" data-welcome-choice="online" type="button" aria-pressed="false">
-                <span class="welcome-card-kicker">COMPETE</span>
+                <span class="welcome-card-kicker">Compete</span>
                 <strong>Play another person</strong>
                 <span>Invite a friend or join an exact time-control match.</span>
               </button>
               <button class="welcome-card" data-welcome-choice="review" type="button" aria-pressed="false">
-                <span class="welcome-card-kicker">REVIEW</span>
+                <span class="welcome-card-kicker">Review</span>
                 <strong>Study the moves</strong>
                 <span>Move backward and forward through every finished position.</span>
               </button>
             </div>
             <p id="welcome-status" class="welcome-status" role="status">
-              PRACTICE SELECTED · NovaForge starts at Adaptive Elo 1000.
+              Practice selected · NovaForge starts at Adaptive Elo 1000.
             </p>
             <nav class="welcome-links" aria-label="Information pages">
               <a href="#terms-page">Read fair-play terms</a>
@@ -253,7 +249,6 @@
           <section id="onboarding-screen" class="panel onboarding-panel" aria-labelledby="onboarding-title" hidden>
             <div class="panel-heading">
               <div>
-                <div class="eyebrow">ACCOUNT ACCESS</div>
                 <h2 id="onboarding-title">Create your player profile</h2>
               </div>
               <span class="step-number" aria-label="Account step">01</span>
@@ -264,14 +259,14 @@
 
             <form id="auth-form" class="auth-form" action="#lobby-screen" method="post">
               <label class="control-field" for="auth-mode">
-                <span>ACCOUNT MODE</span>
+                <span>Account mode</span>
                 <select id="auth-mode" name="auth-mode">
                   <option value="signup" selected>Sign up</option>
                   <option value="login">Sign in</option>
                 </select>
               </label>
               <label class="control-field" for="profile-name">
-                <span>DISPLAY NAME</span>
+                <span>Display name</span>
                 <input
                   id="profile-name"
                   name="profile-name"
@@ -284,7 +279,7 @@
                 />
               </label>
               <label class="control-field" for="profile-handle">
-                <span>HANDLE</span>
+                <span>Handle</span>
                 <input
                   id="profile-handle"
                   name="profile-handle"
@@ -297,7 +292,7 @@
                 />
               </label>
               <label class="control-field" for="profile-password">
-                <span>PASSWORD</span>
+                <span>Password</span>
                 <input
                   id="profile-password"
                   name="profile-password"
@@ -348,7 +343,6 @@
 
         <section id="terms-page" class="info-page" aria-labelledby="terms-page-title" hidden>
           <div class="info-page-inner">
-            <div class="eyebrow">FAIR PLAY</div>
             <h1 id="terms-page-title">Play honestly. Keep the board meaningful.</h1>
             <p class="info-page-lead">
               Nova Chess rated games are designed to reflect the moves made by the people at the
@@ -374,7 +368,6 @@
 
         <section id="privacy-page" class="info-page" aria-labelledby="privacy-page-title" hidden>
           <div class="info-page-inner">
-            <div class="eyebrow">PRIVACY</div>
             <h1 id="privacy-page-title">A small account for a focused chess room.</h1>
             <p class="info-page-lead">
               Nova Chess uses only the information needed to provide accounts, friendships, games,
@@ -399,7 +392,7 @@
         <section id="game-screen" class="screen game-screen" aria-labelledby="game-title">
           <div class="game-toolbar">
             <div>
-              <div class="eyebrow">ACTIVE GAME</div>
+              <div class="eyebrow">Active game</div>
               <h1 id="game-title">Play the position on the board.</h1>
               <p class="section-lead">Your selected clock and opponent are shown beside the board.</p>
             </div>
@@ -409,41 +402,40 @@
             <section class="board-column" aria-label="Chess board and match status">
               <div class="match-strip">
                 <div class="player-chip player-chip-human">
-                  <span class="avatar avatar-human">YOU</span>
+                  <span class="avatar avatar-human">You</span>
                   <span>
-                    <strong id="human-name">WHITE</strong>
-                    <small id="human-state">YOUR MOVE</small>
+                    <strong id="human-name">White</strong>
+                    <small id="human-state">Your move</small>
                     <b id="human-clock" class="player-clock">5:00</b>
                   </span>
                 </div>
                 <div class="match-status">
-                  <span class="turn-kicker">CURRENT TURN</span>
+                  <span class="turn-kicker">Current turn</span>
                   <strong id="game-status">Your move</strong>
                 </div>
                 <div class="player-chip player-chip-engine">
                   <span class="avatar avatar-engine">N</span>
                   <span>
-                    <strong id="opponent-name">NOVAFORGE</strong>
-                    <small id="engine-state">READY</small>
+                    <strong id="opponent-name">NovaForge</strong>
+                    <small id="engine-state">Ready</small>
                     <b id="opponent-clock" class="player-clock">5:00</b>
                   </span>
                 </div>
               </div>
 
               <div class="board-frame">
-                <div class="board-glow" aria-hidden="true"></div>
                 <div id="board" class="board" role="grid" aria-label="Chess board"></div>
               </div>
 
               <div class="board-footer">
                 <div class="board-legend">
-                  <span class="legend-dot legend-dot-last"></span> LAST MOVE
-                  <span class="legend-dot legend-dot-legal"></span> LEGAL MOVE
-                  <span class="legend-dot legend-dot-check"></span> IN CHECK
+                  <span class="legend-dot legend-dot-last"></span> Last move
+                  <span class="legend-dot legend-dot-legal"></span> Legal move
+                  <span class="legend-dot legend-dot-check"></span> In check
                 </div>
-                <div class="fen-label">POSITION <span id="position-label">STARTING</span></div>
+                <div class="fen-label">Position <span id="position-label">Starting</span></div>
                 <div class="premove-controls">
-                  <span id="premove-status" class="premove-status" role="status" aria-live="polite">PREMOVES OFF</span>
+                  <span id="premove-status" class="premove-status" role="status" aria-live="polite">Premove off</span>
                   <button id="clear-premoves" class="text-button" type="button" disabled>Clear</button>
                 </div>
               </div>
@@ -453,17 +445,16 @@
               <section class="panel history-panel" aria-label="Move history and navigation">
                 <div class="panel-heading compact history-heading">
                   <div>
-                    <div class="eyebrow">MOVE RECORD</div>
                     <h2>Move history</h2>
                   </div>
-                  <span id="move-count" class="move-count">0 PLIES</span>
+                  <span id="move-count" class="move-count">0 plies</span>
                 </div>
                 <div id="move-history" class="move-history" aria-live="polite">
                   <div class="history-empty">Your first move will appear here.</div>
                 </div>
                 <div class="move-navigation" aria-label="Move navigation">
                   <button id="previous-move" class="button button-secondary" type="button">Previous</button>
-                  <span id="move-view-status" class="move-view-status" aria-live="polite">LIVE POSITION</span>
+                  <span id="move-view-status" class="move-view-status" aria-live="polite">Live position</span>
                   <button id="next-move" class="button button-secondary" type="button">Next</button>
                   <button id="live-position" class="text-button" type="button">Live position</button>
                 </div>
@@ -471,15 +462,14 @@
               <section class="panel engine-panel">
                 <div class="panel-heading">
                   <div>
-                    <div class="eyebrow">OPPONENT DETAILS</div>
-                    <h2><span id="opponent-heading-name">NovaForge</span> <span class="online-pill">LOCAL</span></h2>
+                    <h2><span id="opponent-heading-name">NovaForge</span> <span class="online-pill">Local</span></h2>
                   </div>
                   <div class="engine-orb" aria-hidden="true">N</div>
                 </div>
 
                 <div class="engine-readout">
                   <div class="readout-row">
-                    <span>ENGINE EVALUATION</span>
+                    <span>Engine evaluation</span>
                     <strong id="engine-eval">+0.20</strong>
                   </div>
                   <div class="eval-track" aria-label="Engine evaluation">
@@ -487,19 +477,19 @@
                     <span class="eval-center"></span>
                   </div>
                   <div class="readout-meta">
-                    <span id="engine-depth">DEPTH 0</span>
-                    <span id="engine-nodes">0 NODES</span>
-                    <span id="engine-time">0.0S</span>
+                    <span id="engine-depth">Depth 0</span>
+                    <span id="engine-nodes">0 nodes</span>
+                    <span id="engine-time">0.0s</span>
                   </div>
                 </div>
 
                 <div class="thinking-row">
                   <span class="thinking-bars" aria-hidden="true"><i></i><i></i><i></i></span>
-                  <span id="thinking-copy">Waiting for a move</span>
+                  <span id="thinking-copy" role="status" aria-live="polite">Waiting for a move</span>
                 </div>
 
                 <div class="line-box">
-                  <div class="line-heading"><span>PRINCIPAL VARIATION</span><span>PV</span></div>
+                  <div class="line-heading"><span>Principal variation</span><span>PV</span></div>
                   <p id="engine-line">Awaiting your first move</p>
                 </div>
               </section>
@@ -507,14 +497,13 @@
               <section class="panel controls-panel">
                 <div class="panel-heading compact">
                   <div>
-                    <div class="eyebrow">MATCH CONTROLS</div>
                     <h2>Adjust this game</h2>
                   </div>
                   <span class="panel-mark" aria-hidden="true">01</span>
                 </div>
 
                 <label class="control-field" for="mode-select">
-                  <span>GAME MODE</span>
+                  <span>Game mode</span>
                     <select id="mode-select">
                       <option value="ai" selected>Human vs NovaForge</option>
                       <option value="local">Local two-player</option>
@@ -523,7 +512,7 @@
                     </select>
                 </label>
                 <label class="control-field" for="time-control-select">
-                  <span>TIME CONTROL</span>
+                  <span>Time control</span>
                   <select id="time-control-select">
                     <option value="1+0">Bullet 1+0</option>
                     <option value="2+1">Bullet 2+1</option>
@@ -536,7 +525,7 @@
 
                 <div id="ai-settings">
                   <label class="control-field" for="color-select">
-                    <span>YOUR SIDE</span>
+                    <span>Your side</span>
                     <select id="color-select">
                       <option value="white">White</option>
                       <option value="black">Black</option>
@@ -544,7 +533,7 @@
                     </select>
                   </label>
                   <label class="control-field" for="difficulty-select">
-                    <span>NOVAFORGE SEARCH</span>
+                    <span>NovaForge search</span>
                     <select id="difficulty-select">
                       <option value="" selected disabled>Choose a strength</option>
                       <option value="adaptive">Adaptive Elo</option>
@@ -554,15 +543,15 @@
                       <option value="apex">Apex</option>
                     </select>
                     <span id="adaptive-level" class="adaptive-level" aria-live="polite">
-                      ADAPTIVE ELO · 1000 · FORGE
+                      Adaptive Elo · 1000 · Forge
                     </span>
                   </label>
                 </div>
 
-                 <div id="online-settings" class="friend-game-controls" hidden aria-hidden="true">
-                   <div id="online-room-status" class="online-room-status">Friend match is ready when both players connect.</div>
+                <div id="online-settings" class="friend-game-controls" hidden aria-hidden="true">
+                  <div id="online-room-status" class="online-room-status">Friend match is ready when both players connect.</div>
                   <div id="online-actions" class="online-actions" hidden>
-                    <div class="online-actions-heading">MATCH ACTIONS</div>
+                    <div class="online-actions-heading">Match actions</div>
                     <div id="online-action-status" class="online-action-status">Waiting for both players to connect.</div>
                     <div class="button-row online-action-row">
                       <button id="offer-draw" class="button button-secondary" type="button">Offer draw</button>
@@ -570,7 +559,7 @@
                     </div>
                     <div id="claimable-draws" hidden></div>
                     <div id="rematch-panel" hidden>
-                      <div class="rematch-meta"><span>REMATCH VOTES</span><strong id="rematch-votes">0/2</strong></div>
+                      <div class="rematch-meta"><span>Rematch votes</span><strong id="rematch-votes">0/2</strong></div>
                       <button id="rematch-game" class="button button-primary" type="button">Request rematch</button>
                     </div>
                     <button id="resign-game" class="button button-danger" type="button">Resign friend game</button>
@@ -584,7 +573,7 @@
                 <button id="flip-board" class="text-button" type="button">Flip board</button>
 
                 <div id="resign-match" class="match-actions" aria-label="Resignation controls">
-                  <span class="actions-label">RESIGN</span>
+                  <span class="actions-label">Resign</span>
                   <button id="resign-local" class="button button-danger" type="button">Resign local game</button>
                   <button id="resign-ai" class="button button-danger" type="button">Resign vs NovaForge</button>
                 </div>
@@ -604,14 +593,13 @@
           >
             <div class="analysis-header">
               <div>
-                <div class="eyebrow">POST-GAME ANALYSIS</div>
                 <h2 id="analysis-title">Review the finished position</h2>
               </div>
               <button id="analysis-close" class="button button-secondary" type="button">Close analysis</button>
             </div>
             <div class="analysis-navigation" aria-label="Analysis move navigation">
               <button id="analysis-previous" class="button button-secondary" type="button">Previous</button>
-              <span id="analysis-view-status" class="move-view-status" aria-live="polite">FINAL POSITION</span>
+               <span id="analysis-view-status" class="move-view-status" aria-live="polite">Final position</span>
               <button id="analysis-next" class="button button-secondary" type="button">Next</button>
               <button id="analysis-live" class="text-button" type="button">Final position</button>
             </div>
@@ -626,14 +614,13 @@
       </main>
 
       <footer class="site-footer">
-        <span>STANDARD CHESS · CHESS960 · LOCAL SESSIONS</span>
-        <span>CASTLING · EN PASSANT · PROMOTION · CHECKMATE</span>
+        <span>Standard chess · Chess960 · Local sessions</span>
+        <span>Castling · En passant · Promotion · Checkmate</span>
       </footer>
     </div>
 
     <div id="promotion-modal" class="modal-backdrop" hidden>
       <div class="promotion-modal" role="dialog" aria-modal="true" aria-labelledby="promotion-title">
-        <div class="eyebrow">FINAL RANK</div>
         <h2 id="promotion-title">Choose a promotion piece</h2>
         <p>Your pawn reached the last rank. Select its new piece.</p>
         <div id="promotion-options" class="promotion-options"></div>

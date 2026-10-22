@@ -113,7 +113,7 @@ function createClient(wsUrl, port, cookie) {
     if (socket.readyState === WebSocket.CLOSED) return;
     if (socket.readyState === WebSocket.OPEN) socket.close();
     else socket.terminate();
-    await closed.catch(() => {});
+    await closed;
   }
 
   return { socket, messages, opened, closed, waitFor, close };

@@ -98,7 +98,7 @@ function createClient(wsUrl, port, cookie, origin = `http://127.0.0.1:${port}`) 
     if (socket.readyState === WebSocket.CLOSED) return;
     if (socket.readyState === WebSocket.OPEN) socket.close();
     else socket.terminate();
-    await closed.catch(() => {});
+    await closed;
   }
 
   return { socket, messages, opened, closed, waitFor, close };

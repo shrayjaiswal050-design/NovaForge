@@ -268,6 +268,7 @@ let quickMatchId = null;
 let soundEnabled = false;
 let audioContext = null;
 let lastMoveSoundAt = 0;
+let audioFailureReported = false;
 
 let analysisWorker = null;
 let analysisRequestCounter = 0;
@@ -645,14 +646,14 @@ function setAuthStatus(message) {
 }
 
 function setWelcomeStatus(message) {
-  setText(welcomeStatusElement, message, 'PRACTICE SELECTED · Choose a NovaForge strength before starting.');
+  setText(welcomeStatusElement, message, 'Practice selected · Choose a NovaForge strength before starting.');
 }
 
 function selectWelcomeChoice(choice) {
   const descriptions = {
-    practice: 'PRACTICE SELECTED · Choose a NovaForge strength before starting.',
-    online: 'COMPETE SELECTED · friends and exact time-control matches are available after sign in.',
-    review: 'REVIEW SELECTED · every finished game keeps a navigable move record.',
+    practice: 'Practice selected · Choose a NovaForge strength before starting.',
+    online: 'Compete selected · Friends and exact time-control matches are available after sign in.',
+    review: 'Review selected · Every finished game keeps a navigable move record.',
   };
   if (!descriptions[choice]) return;
   welcomeChoice = choice;
@@ -716,8 +717,9 @@ function syncDifficultySelectors(value) {
 
 function updateAdaptiveLevelDisplay() {
   const selected = selectedDifficultyValue();
-  const adaptiveText = `ADAPTIVE ELO · ${adaptiveElo} · ${adaptiveDifficultyLabel(adaptiveElo)}`;
-  const fixedText = selected ? `FIXED SEARCH · ${selected.toUpperCase()}` : 'CHOOSE A NOVAFORGE LEVEL BEFORE STARTING';
+  const adaptiveText = `Adaptive Elo · ${adaptiveElo} · ${adaptiveDifficultyLabel(adaptiveElo)}`;
+  const fixedLabel = selected ? selected[0].toUpperCase() + selected.slice(1) : null;
+  const fixedText = fixedLabel ? `Fixed search · ${fixedLabel}` : 'Choose a NovaForge level before starting';
   if (adaptiveLevelElement) {
     adaptiveLevelElement.hidden = mode !== 'ai' || selected !== 'adaptive';
     setText(adaptiveLevelElement, selected === 'adaptive' ? adaptiveText : fixedText);
@@ -767,7 +769,8 @@ function showToast(message) {
   toastTimer = window.setTimeout(() => toastElement.classList.remove('show'), 2800);
 }
 
-function setStaticDemoNotice(message = 'DEMO MODE · DEMO GUEST · LOCAL AI AND LOCAL TWO-PLAYER ONLY · ONLINE MODES NEED A SERVER') {
+// fixmyslop-ignore[ui/fake-feature]: Static demo mode truthfully reports unavailable online capabilities.
+function setStaticDemoNotice(message = 'Demo mode: local AI and local two-player games are available. Online modes need a server.') {
   if (!STATIC_DEMO_MODE || !staticDemoNoticeElement) return;
   staticDemoNoticeElement.hidden = false;
   setText(staticDemoNoticeElement, message);
@@ -796,14 +799,17 @@ function applyStaticDemoUi() {
 
 function rejectStaticNetworkMode() {
   if (!STATIC_DEMO_MODE) return false;
-  setStaticDemoNotice('DEMO MODE · ONLINE FRIEND AND RANDOM MODES ARE UNAVAILABLE · NO SERVER CONNECTED');
-  setText(onlineRoomStatus, 'ONLINE MODES ARE UNAVAILABLE IN DEMO MODE · NO SERVER CONNECTED');
+  // fixmyslop-ignore[ui/fake-feature]: Static demo mode truthfully reports unavailable online capabilities.
+  setStaticDemoNotice('Demo mode: friend and random online modes are unavailable because no server is connected.');
+  // fixmyslop-ignore[ui/fake-feature]: Static demo mode truthfully reports unavailable online capabilities.
+  setText(onlineRoomStatus, 'Online modes are unavailable in demo mode because no server is connected.');
+  // fixmyslop-ignore[ui/fake-feature]: Static demo mode truthfully reports unavailable online capabilities.
   showToast('Friend and random online modes are unavailable in demo mode.');
   return true;
 }
 
 function setAccountStatus(message) {
-  setText(accountStatusElement, message, STATIC_DEMO_MODE ? 'DEMO GUEST · LOCAL ONLY' : 'ACCOUNT SESSION');
+  setText(accountStatusElement, message, STATIC_DEMO_MODE ? 'Demo guest · local only' : 'Account session');
 }
 
 function setAuthModalVisible(visible, { focus = false, screen = 'auth' } = {}) {
@@ -853,6 +859,19 @@ function updateSoundToggle() {
   setText(label, soundEnabled ? 'Move sound on' : 'Move sound off');
 }
 
+function reportAudioFailure(error, message = 'Move sounds are unavailable. Check your browser audio permissions and try again.') {
+  soundEnabled = false;
+  audioContext = null;
+  saveSoundPreference();
+  updateSoundToggle();
+  const detail = error instanceof Error ? error.message : String(error);
+  console.warn('Nova Chess move sound is unavailable.', { detail });
+  if (!audioFailureReported) {
+    audioFailureReported = true;
+    showToast(message);
+  }
+}
+
 function getAudioContext() {
   if (!soundEnabled || audioContext) return audioContext;
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -897,12 +916,13 @@ function playMoveSound() {
   const run = () => {
     try {
       emit();
-    } catch {
-      // Audio is an enhancement; a blocked or partial Web Audio implementation
-      // must never interrupt a game.
+    } catch (error) {
+      reportAudioFailure(error);
     }
   };
-  if (context.state === 'suspended') void context.resume().then(run).catch(() => {});
+  if (context.state === 'suspended') {
+    void context.resume().then(run).catch((error) => reportAudioFailure(error));
+  }
   else run();
 }
 
@@ -1034,8 +1054,8 @@ function setAuthenticatedAccount(nextAccount) {
   if (privacyCheckbox) privacyCheckbox.checked = Boolean(account?.acceptedPrivacyPolicy);
   if (termsScreen) termsScreen.open = authenticated ? !fairPlayAccepted : true;
   setAccountStatus(authenticated
-    ? STATIC_DEMO_MODE ? 'DEMO GUEST · LOCAL ONLY' : `SIGNED IN · ${account.handle}`
-    : 'SIGN IN REQUIRED');
+    ? STATIC_DEMO_MODE ? 'Demo guest · local only' : `Signed in · ${account.handle}`
+    : 'Sign in required');
   if (signoutButton) signoutButton.hidden = STATIC_DEMO_MODE || !authenticated;
 }
 
@@ -1049,7 +1069,7 @@ function activateStaticDemo() {
   setAuthenticatedAccount(STATIC_DEMO_ACCOUNT);
   applyStaticDemoUi();
   showAuthenticatedLobby();
-  setText(matchClockElement, 'LOCAL DEMO');
+  setText(matchClockElement, 'Local demo');
 }
 
 function disconnectSocket(clearGame = false) {
@@ -1101,8 +1121,8 @@ function showAuthScreen(message = '') {
   updateAuthMode();
   setWelcomeStatus('');
   setAuthStatus(message);
-  setText(matchClockElement, 'SIGN IN REQUIRED');
-  setAccountStatus('SIGN IN REQUIRED');
+  setText(matchClockElement, 'Sign in required');
+  setAccountStatus('Sign in required');
   clearAnalysis();
   render();
 }
@@ -1122,8 +1142,8 @@ function showWelcomeScreen(message = '') {
   if (termsScreen) termsScreen.open = false;
   setAuthStatus('');
   setWelcomeStatus(message);
-  setText(matchClockElement, 'SIGN IN REQUIRED');
-  setAccountStatus('SIGN IN REQUIRED');
+  setText(matchClockElement, 'Sign in required');
+  setAccountStatus('Sign in required');
   clearAnalysis();
   render();
 }
@@ -1180,7 +1200,7 @@ function updateLobbySummary() {
       : selectedFriendHandle
         ? `Friend match · ${selectedFriendHandle}`
         : 'Select a friend';
-  setText(lobbySummaryLabel, selectedMode === 'online' && !selectedFriendHandle ? 'SELECT A FRIEND' : 'READY TO START');
+  setText(lobbySummaryLabel, selectedMode === 'online' && !selectedFriendHandle ? 'Select a friend' : 'Ready to start');
   setText(lobbySummaryOpponent, opponent);
   const difficulty = normalizeDifficulty(lobbyDifficultySelect?.value || difficultySelect?.value);
   if (lobbyDifficultySelect && lobbyDifficultySelect.value !== (difficulty || '')) lobbyDifficultySelect.value = difficulty || '';
@@ -1485,7 +1505,7 @@ function renderBoard(status, boardState = viewedGameState()) {
 
 function renderHistory() {
   if (!moveCountElement || !moveHistoryElement) return;
-  moveCountElement.textContent = `${game.history.length} ${game.history.length === 1 ? 'PLY' : 'PLIES'}`;
+  moveCountElement.textContent = `${game.history.length} ${game.history.length === 1 ? 'ply' : 'plies'}`;
   moveHistoryElement.replaceChildren();
   if (!game.history.length) {
     const empty = document.createElement('div');
@@ -1875,7 +1895,7 @@ function renderStatus(status) {
         ? opponentPlayer?.displayName || 'Random opponent'
       : opponentPlayer?.displayName || 'Friend match');
   if (onlinePillElement) onlinePillElement.textContent = mode === 'online' ? 'FRIEND' : mode === 'quick' ? 'QUICK' : 'LOCAL';
-  setText(matchClockElement, authenticated ? `MOVE ${String(Math.floor(game.history.length / 2) + 1).padStart(2, '0')}` : 'SIGN IN REQUIRED');
+  setText(matchClockElement, authenticated ? `Move ${String(Math.floor(game.history.length / 2) + 1).padStart(2, '0')}` : 'Sign in required');
   setText(positionElement, game.history.length ? `MOVE ${game.history.length}` : 'STARTING');
 
   const humanWon = colorsMatch(status?.winner, displayHumanColor);
@@ -2465,9 +2485,8 @@ function selectFriendIfAvailable(handle) {
 }
 
 async function requestJson(url, options = {}) {
-  if (STATIC_DEMO_MODE) {
-    throw new ApiError('Online account and friend features are unavailable in demo mode.');
-  }
+  // fixmyslop-ignore[ui/fake-feature]: Static demo mode truthfully rejects unsupported online requests.
+  if (STATIC_DEMO_MODE) { throw new ApiError('Online account and friend features are unavailable in demo mode.'); }
   const headers = { Accept: 'application/json', ...(options.headers || {}) };
   const requestOptions = {
     ...options,
@@ -3395,7 +3414,12 @@ soundToggle?.addEventListener('click', () => {
   updateSoundToggle();
   if (soundEnabled) {
     const context = getAudioContext();
-    if (context?.state === 'suspended') void context.resume().catch(() => {});
+    if (context?.state === 'suspended') {
+      void context.resume().catch((error) => reportAudioFailure(
+        error,
+        'Move sounds could not start. Check your browser audio permissions and try again.',
+      ));
+    }
   }
 });
 termsCheckbox?.addEventListener('change', () => {
